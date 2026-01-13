@@ -1,0 +1,14 @@
+{
+  "workspaces": [
+    {
+      "id": "example",
+      "name": "Example Project",
+      "path": "/path/to/your/project",
+      "validationPrompt": "Verify the changes are correct. Run any relevant tests. Report results clearly with PASS or FAIL.",
+      "outputPrompt": "Generate the requested output images in the ./outputs/ directory. Create the directory if it doesn't exist."
+    }
+  ],
+  "mcps": [],
+  "model": "claude-sonnet-4",
+  "port": 3000
+}

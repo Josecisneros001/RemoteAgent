@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Remote Agent</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="/styles/main.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <h1>🤖 Remote Agent</h1>
+      <div class="connection-status" id="connectionStatus">
+        <span class="status-dot"></span>
+        <span class="status-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav">
+      <button class="nav-btn active" data-view="new-run">New Run</button>
+      <button class="nav-btn" data-view="history">History</button>
+      <button class="nav-btn" data-view="current">Current</button>
+    </nav>
+
+    <!-- Views Container -->
+    <main class="views">
+      <!-- New Run View -->
+      <section id="view-new-run" class="view active">
+        <div class="view-new-run-grid">
+          <div class="form-group">
+            <label for="workspace">Workspace</label>
+            <select id="workspace" class="input">
+              <option value="">Loading workspaces...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="session">Session</label>
+            <select id="session" class="input">
+              <option value="">✨ New Session</option>
+            </select>
+            <div id="sessionInfo" class="session-info" hidden></div>
+          </div>
+
+          <div class="form-group full-width">
+            <label for="prompt">Prompt</label>
+            <textarea id="prompt" class="input textarea" rows="4" placeholder="What do you want to do?"></textarea>
+          </div>
+
+          <div class="form-section collapsed">
+            <div class="form-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+              Advanced Options (Validation & Images)
+            </div>
+            <div class="form-section-content">
+              <div class="form-group">
+                <label for="validation">Validation Instructions</label>
+                <textarea id="validation" class="input textarea" rows="2" placeholder="How to verify the changes (runs in isolated session)"></textarea>
+              </div>
+
+              <div class="form-group">
+                <label for="imageInstructions">Output Images</label>
+                <textarea id="imageInstructions" class="input textarea" rows="2" placeholder="What images to generate (runs in isolated session)"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <button id="submitBtn" class="btn btn-primary">
+            <span class="btn-text">Start Run</span>
+            <span class="btn-loading" hidden>Running...</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- History View -->
+      <section id="view-history" class="view">
+        <div id="runsList" class="runs-list">
+          <p class="empty-state">Loading runs...</p>
+        </div>
+      </section>
+
+      <!-- Current/Detail View -->
+      <section id="view-current" class="view">
+        <div id="runDetail" class="run-detail">
+          <p class="empty-state">No run selected</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Notification Permission Banner -->
+    <div id="notificationBanner" class="notification-banner" hidden>
+      <p>Enable notifications to get alerts when runs complete</p>
+      <button id="enableNotifications" class="btn btn-small">Enable</button>
+      <button id="dismissNotifications" class="btn btn-small btn-secondary">Later</button>
+    </div>
+  </div>
+
+  <script src="/js/app.js" type="module"></script>
+</body>
+</html>
