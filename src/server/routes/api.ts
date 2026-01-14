@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { readFile } from 'fs/promises';
+import { readFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -9,7 +9,7 @@ import { startNewSession, continueSession, abortCurrentRun, getCurrentRunId, get
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
-import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo } from '../services/git.js';
+import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo } from '../services/git.js';
 import type { CreateSessionRequest, StartRunRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -64,7 +64,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // Create new session and start first run
   app.post<{ Body: CreateSessionRequest }>('/api/sessions', async (request, reply) => {
-    const { workspaceId, prompt, validationPrompt, outputPrompt, model, enabledMcps } = request.body;
+    const { workspaceId, prompt, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
 
     // Validate workspace
     const workspace = getWorkspace(workspaceId);
@@ -86,7 +86,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const { session, run } = await startNewSession(
       workspaceId,
       prompt,
-      { validationPrompt, outputPrompt, model, enabledMcps },
+      { validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
       broadcast
     );
 
@@ -96,7 +96,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // Add a new run to existing session
   app.post<{ Params: { id: string }; Body: StartRunRequest }>('/api/sessions/:id/runs', async (request, reply) => {
     const sessionId = request.params.id;
-    const { prompt, validationPrompt, outputPrompt, model, enabledMcps } = request.body;
+    const { prompt, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
 
     const session = await getSession(sessionId);
     if (!session) {
@@ -112,7 +112,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const run = await continueSession(
       sessionId,
       prompt,
-      { validationPrompt, outputPrompt, model, enabledMcps },
+      { validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
       broadcast
     );
 
@@ -215,9 +215,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // ==================== WORKSPACES ====================
 
-  // Add a local workspace
+  // Add a local workspace (optionally create folder and init git)
   app.post('/api/workspaces', async (request, reply) => {
-    const { name, path, validationPrompt, outputPrompt, defaultModel, validationModel, outputModel } = request.body as {
+    const { 
+      name, path, validationPrompt, outputPrompt, 
+      defaultModel, validationModel, outputModel,
+      createFolder, initGit
+    } = request.body as {
       name: string;
       path: string;
       validationPrompt?: string;
@@ -225,21 +229,44 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       defaultModel?: string;
       validationModel?: string;
       outputModel?: string;
+      createFolder?: boolean;
+      initGit?: boolean;
     };
 
     if (!name || !path) {
       return reply.status(400).send({ error: 'name and path are required' });
     }
 
-    // Check if path exists
-    if (!existsSync(path)) {
-      return reply.status(400).send({ error: 'Path does not exist' });
-    }
-
-    // Check if workspace already exists
+    // Check if workspace already exists in config
     const existingWorkspace = getWorkspace(path);
     if (existingWorkspace) {
       return reply.status(400).send({ error: 'Workspace already exists' });
+    }
+
+    // Handle folder creation/existence
+    if (!existsSync(path)) {
+      // Auto-create directory if it doesn't exist
+      try {
+        await mkdir(path, { recursive: true });
+        
+        // Initialize git repository in newly created folder
+        await initGitRepo(path);
+      } catch (error) {
+        return reply.status(500).send({ 
+          error: `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}` 
+        });
+      }
+    } else if (createFolder) {
+      // User explicitly asked to create a new folder but it already exists
+      return reply.status(400).send({ error: 'Path already exists' });
+    } else {
+      // Existing folder - optionally init git if requested
+      if (initGit) {
+        const insideGit = await isInsideGitRepo(path);
+        if (!insideGit) {
+          await initGitRepo(path);
+        }
+      }
     }
 
     const workspace = {
@@ -254,12 +281,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     };
     await addWorkspace(workspace);
 
-    return { workspace };
+    // Check git status for the response
+    const isRepo = await isGitRepo(path);
+
+    return { workspace, isGitRepo: isRepo };
   });
   
   // Clone a new workspace
   app.post<{ Body: CloneWorkspaceRequest }>('/api/workspaces/clone', async (request, reply) => {
-    const { gitUrl, name, targetPath } = request.body;
+    const { gitUrl, name, targetPath, validationPrompt, outputPrompt, defaultModel, validationModel, outputModel } = request.body;
     
     if (!gitUrl || !name) {
       return reply.status(400).send({ error: 'gitUrl and name are required' });
@@ -282,10 +312,15 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         name,
         path: workspacePath,
         gitRepo: gitUrl,
+        validationPrompt,
+        outputPrompt,
+        defaultModel,
+        validationModel,
+        outputModel,
       };
       await addWorkspace(workspace);
       
-      return { workspace };
+      return { workspace, isGitRepo: true };
     } catch (error) {
       return reply.status(500).send({ 
         error: `Failed to clone repository: ${error instanceof Error ? error.message : 'Unknown error'}` 

@@ -1280,6 +1280,51 @@ select.input {
   }
 }
 
+/* Radio group */
+.radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  transition: all 0.2s;
+}
+
+.radio-label:hover {
+  border-color: var(--accent);
+}
+
+.radio-label:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(233, 69, 96, 0.1);
+}
+
+.radio-label input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+/* Checkbox label */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+
 /* Input with action button */
 .input-with-action {
   display: flex;
@@ -1295,4 +1340,9 @@ select.input {
   font-size: 1rem;
   line-height: 1;
   min-width: auto;
+}
+
+/* Larger modal */
+.modal-content.modal-lg {
+  max-width: 640px;
 }

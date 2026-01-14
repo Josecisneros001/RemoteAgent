@@ -288,22 +288,100 @@ function populateWorkspaces() {
 function populateModels() {
   const models = config?.availableModels || [];
   const defaultModel = config?.defaultModel || '';
+  const defaultValidationModel = config?.defaultValidationModel || defaultModel;
+  const defaultOutputModel = config?.defaultOutputModel || defaultModel;
   
-  [modelSelect, runModelSelect].forEach(select => {
-    if (!select) return;
-    
-    const isRunModel = select === runModelSelect;
-    select.innerHTML = isRunModel 
-      ? '<option value="">Use session default</option>'
-      : `<option value="">Default (${defaultModel})</option>`;
-    
+  // Populate main model select (new session form)
+  if (modelSelect) {
+    modelSelect.innerHTML = '';
     models.forEach(model => {
       const option = document.createElement('option');
       option.value = model;
-      option.textContent = model;
-      select.appendChild(option);
+      option.textContent = model === defaultModel ? `${model} (default)` : model;
+      if (model === defaultModel) option.selected = true;
+      modelSelect.appendChild(option);
     });
-  });
+  }
+  
+  // Run model select will be populated dynamically when session is loaded
+  // with the session's actual model as default
+  
+  // Populate session-level validation/output model selects
+  const sessionValidationModel = document.getElementById('sessionValidationModel');
+  const sessionOutputModel = document.getElementById('sessionOutputModel');
+  
+  if (sessionValidationModel) {
+    sessionValidationModel.innerHTML = '';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model === defaultValidationModel ? `${model} (default)` : model;
+      if (model === defaultValidationModel) option.selected = true;
+      sessionValidationModel.appendChild(option);
+    });
+  }
+  
+  if (sessionOutputModel) {
+    sessionOutputModel.innerHTML = '';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model === defaultOutputModel ? `${model} (default)` : model;
+      if (model === defaultOutputModel) option.selected = true;
+      sessionOutputModel.appendChild(option);
+    });
+  }
+}
+
+// Populate run model selects based on current session's models
+function populateRunModelSelects() {
+  const models = config?.availableModels || [];
+  if (!models.length || !currentSession) return;
+  
+  // Get session's effective models (session override -> workspace default -> global default)
+  const workspace = config?.workspaces?.find(w => w.id === currentSession.workspaceId);
+  
+  const sessionModel = currentSession.defaultModel || workspace?.defaultModel || config?.defaultModel || models[0];
+  const sessionValidationModel = currentSession.validationModel || workspace?.validationModel || config?.defaultValidationModel || sessionModel;
+  const sessionOutputModel = currentSession.outputModel || workspace?.outputModel || config?.defaultOutputModel || sessionModel;
+  
+  // Populate prompt model select
+  if (runModelSelect) {
+    runModelSelect.innerHTML = '';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model === sessionModel ? `${model} (session default)` : model;
+      if (model === sessionModel) option.selected = true;
+      runModelSelect.appendChild(option);
+    });
+  }
+  
+  // Populate validation model select
+  const runValidationModelSelect = document.getElementById('runValidationModel');
+  if (runValidationModelSelect) {
+    runValidationModelSelect.innerHTML = '';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model === sessionValidationModel ? `${model} (session default)` : model;
+      if (model === sessionValidationModel) option.selected = true;
+      runValidationModelSelect.appendChild(option);
+    });
+  }
+  
+  // Populate output model select
+  const runOutputModelSelect = document.getElementById('runOutputModel');
+  if (runOutputModelSelect) {
+    runOutputModelSelect.innerHTML = '';
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model === sessionOutputModel ? `${model} (session default)` : model;
+      if (model === sessionOutputModel) option.selected = true;
+      runOutputModelSelect.appendChild(option);
+    });
+  }
 }
 
 function loadWorkspaceDefaults() {
@@ -339,6 +417,8 @@ async function handleNewSession(e) {
         validationPrompt: validationPromptInput.value.trim() || undefined,
         outputPrompt: outputPromptInput.value.trim() || undefined,
         model: modelSelect.value || undefined,
+        validationModel: document.getElementById('sessionValidationModel')?.value || undefined,
+        outputModel: document.getElementById('sessionOutputModel')?.value || undefined,
       }),
     });
 
@@ -396,6 +476,8 @@ async function handleNewRun(e) {
         validationPrompt: runValidationInput.value.trim() || undefined,
         outputPrompt: runOutputInput.value.trim() || undefined,
         model: runModelSelect.value || undefined,
+        validationModel: document.getElementById('runValidationModel')?.value || undefined,
+        outputModel: document.getElementById('runOutputModel')?.value || undefined,
       }),
     });
 
@@ -514,6 +596,9 @@ function renderSessionDetail() {
   if (currentSession.defaultOutputPrompt) {
     runOutputInput.value = currentSession.defaultOutputPrompt;
   }
+  
+  // Populate run model selects with session's actual models
+  populateRunModelSelects();
   
   renderRunsTimeline();
 }
@@ -868,6 +953,11 @@ function setupWorkspaceModal() {
   workspaceModal?.querySelector('.modal-backdrop')?.addEventListener('click', closeWorkspaceModal);
 
   addWorkspaceForm?.addEventListener('submit', handleAddWorkspace);
+  
+  // Workspace type radio buttons
+  document.querySelectorAll('input[name="workspaceType"]').forEach(radio => {
+    radio.addEventListener('change', updateWorkspaceTypeUI);
+  });
 }
 
 function openWorkspaceModal() {
@@ -896,7 +986,55 @@ function openWorkspaceModal() {
     }
   });
   
+  // Reset to default state
+  const existingRadio = document.querySelector('input[name="workspaceType"][value="existing"]');
+  if (existingRadio) existingRadio.checked = true;
+  updateWorkspaceTypeUI();
+  
   workspaceModal.hidden = false;
+}
+
+function updateWorkspaceTypeUI() {
+  const selectedType = document.querySelector('input[name="workspaceType"]:checked')?.value || 'existing';
+  
+  const pathGroup = document.getElementById('pathGroup');
+  const gitUrlGroup = document.getElementById('gitUrlGroup');
+  const targetPathGroup = document.getElementById('targetPathGroup');
+  const gitInitGroup = document.getElementById('gitInitGroup');
+  const submitBtn = document.getElementById('submitWorkspaceBtn');
+  const pathInput = document.getElementById('workspacePath');
+  const gitUrlInput = document.getElementById('workspaceGitUrl');
+  
+  // Reset required states
+  if (pathInput) pathInput.required = false;
+  if (gitUrlInput) gitUrlInput.required = false;
+  
+  switch (selectedType) {
+    case 'existing':
+      pathGroup.hidden = false;
+      gitUrlGroup.hidden = true;
+      targetPathGroup.hidden = true;
+      gitInitGroup.hidden = true;
+      if (submitBtn) submitBtn.textContent = 'Add Workspace';
+      if (pathInput) pathInput.required = true;
+      break;
+    case 'new':
+      pathGroup.hidden = false;
+      gitUrlGroup.hidden = true;
+      targetPathGroup.hidden = true;
+      gitInitGroup.hidden = false;
+      if (submitBtn) submitBtn.textContent = 'Create Workspace';
+      if (pathInput) pathInput.required = true;
+      break;
+    case 'clone':
+      pathGroup.hidden = true;
+      gitUrlGroup.hidden = false;
+      targetPathGroup.hidden = false;
+      gitInitGroup.hidden = true;
+      if (submitBtn) submitBtn.textContent = 'Clone Repository';
+      if (gitUrlInput) gitUrlInput.required = true;
+      break;
+  }
 }
 
 function closeWorkspaceModal() {
@@ -907,30 +1045,71 @@ function closeWorkspaceModal() {
 async function handleAddWorkspace(e) {
   e.preventDefault();
 
+  const selectedType = document.querySelector('input[name="workspaceType"]:checked')?.value || 'existing';
   const name = document.getElementById('workspaceName')?.value.trim();
-  const path = document.getElementById('workspacePath')?.value.trim();
   const validationPrompt = document.getElementById('workspaceValidation')?.value.trim() || undefined;
   const outputPrompt = document.getElementById('workspaceOutput')?.value.trim() || undefined;
   const defaultModel = document.getElementById('wsDefaultModel')?.value || undefined;
   const validationModel = document.getElementById('wsValidationModel')?.value || undefined;
   const outputModel = document.getElementById('wsOutputModel')?.value || undefined;
 
-  if (!name || !path) return;
+  if (!name) return;
+
+  const submitBtn = document.getElementById('submitWorkspaceBtn');
+  const originalText = submitBtn?.textContent;
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Processing...';
+  }
 
   try {
-    const res = await fetch('/api/workspaces', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        name, 
-        path, 
-        validationPrompt, 
-        outputPrompt,
-        defaultModel,
-        validationModel,
-        outputModel,
-      }),
-    });
+    let res;
+    
+    if (selectedType === 'clone') {
+      // Clone repository
+      const gitUrl = document.getElementById('workspaceGitUrl')?.value.trim();
+      const targetPath = document.getElementById('workspaceTargetPath')?.value.trim() || undefined;
+      
+      if (!gitUrl) return;
+      
+      res = await fetch('/api/workspaces/clone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          gitUrl,
+          name,
+          targetPath,
+          validationPrompt, 
+          outputPrompt,
+          defaultModel,
+          validationModel,
+          outputModel,
+        }),
+      });
+    } else {
+      // Existing folder or create new
+      const path = document.getElementById('workspacePath')?.value.trim();
+      if (!path) return;
+      
+      const createFolder = selectedType === 'new';
+      const initGit = createFolder && document.getElementById('workspaceInitGit')?.checked;
+      
+      res = await fetch('/api/workspaces', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          name, 
+          path,
+          createFolder,
+          initGit,
+          validationPrompt, 
+          outputPrompt,
+          defaultModel,
+          validationModel,
+          outputModel,
+        }),
+      });
+    }
 
     if (!res.ok) {
       const error = await res.json();
@@ -938,18 +1117,32 @@ async function handleAddWorkspace(e) {
       return;
     }
 
+    const data = await res.json();
+    
     // Reload config to get updated workspace list
     await loadConfig();
     closeWorkspaceModal();
     
+    // Show success message
+    const gitStatus = data.isGitRepo ? ' (Git initialized)' : '';
+    console.log(`Workspace "${name}" added successfully${gitStatus}`);
+    
     // Select the new workspace
-    if (workspaceSelect) {
-      workspaceSelect.value = path;
-      loadWorkspaceDefaults();
+    if (workspaceSelect && data.workspace?.path) {
+      // Need to wait for populateWorkspaces to run
+      setTimeout(() => {
+        workspaceSelect.value = data.workspace.id;
+        loadWorkspaceDefaults();
+      }, 100);
     }
   } catch (error) {
     console.error('Failed to add workspace:', error);
     alert('Failed to add workspace');
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalText;
+    }
   }
 }
 

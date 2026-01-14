@@ -2,6 +2,7 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import { join, basename } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, readdir, stat } from 'fs/promises';
+import { homedir } from 'os';
 import { addImage } from './run-store.js';
 import type { ImageResult, WsImageEvent } from '../types.js';
 
@@ -21,6 +22,11 @@ const state: WatcherState = {
   callback: null,
 };
 
+// Get the outputs directory for a specific run
+export function getRunOutputsDir(runId: string): string {
+  return join(homedir(), '.remote-agent', 'runs-outputs', runId);
+}
+
 export async function startWatching(
   workspacePath: string,
   runId: string,
@@ -30,7 +36,7 @@ export async function startWatching(
   // Stop any existing watcher
   await stopWatching();
 
-  const outputsDir = join(workspacePath, 'outputs');
+  const outputsDir = getRunOutputsDir(runId);
   
   // Ensure outputs directory exists
   if (!existsSync(outputsDir)) {
@@ -106,7 +112,7 @@ export async function syncImagesForRun(
   workspacePath: string,
   runId: string
 ): Promise<ImageResult[]> {
-  const outputsDir = join(workspacePath, 'outputs');
+  const outputsDir = getRunOutputsDir(runId);
   
   if (!existsSync(outputsDir)) {
     return [];

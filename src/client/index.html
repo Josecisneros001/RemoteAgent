@@ -104,6 +104,22 @@
 
             <details class="advanced-options">
               <summary>Advanced Options</summary>
+              
+              <div class="form-section-header">Model Overrides</div>
+              <div class="form-row-3">
+                <div class="form-group">
+                  <label for="sessionValidationModel">Validation Model</label>
+                  <select id="sessionValidationModel" class="input">
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="sessionOutputModel">Output Model</label>
+                  <select id="sessionOutputModel" class="input">
+                  </select>
+                </div>
+              </div>
+              
+              <div class="form-section-header">Custom Prompts</div>
               <div class="form-group">
                 <label for="validationPrompt">Validation Prompt</label>
                 <textarea id="validationPrompt" class="input textarea" rows="2" placeholder="How to validate the changes..."></textarea>
@@ -174,13 +190,28 @@
                   <div class="form-group">
                     <label for="runModel">Model</label>
                     <select id="runModel" class="input">
-                      <option value="">Use session default</option>
                     </select>
                   </div>
                 </div>
 
                 <details class="advanced-options">
                   <summary>Override Prompts</summary>
+                  
+                  <div class="form-section-header">Model Overrides</div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="runValidationModel">Validation Model</label>
+                      <select id="runValidationModel" class="input">
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="runOutputModel">Output Model</label>
+                      <select id="runOutputModel" class="input">
+                      </select>
+                    </div>
+                  </div>
+                  
+                  <div class="form-section-header">Prompt Overrides</div>
                   <div class="form-group">
                     <label for="runValidation">Validation Prompt</label>
                     <textarea id="runValidation" class="input textarea" rows="2" placeholder="Override validation..."></textarea>
@@ -223,19 +254,60 @@
     <!-- Workspace Modal -->
     <div id="workspaceModal" class="modal" hidden>
       <div class="modal-backdrop"></div>
-      <div class="modal-content">
+      <div class="modal-content modal-lg">
         <div class="modal-header">
           <h3>Add Workspace</h3>
           <button class="modal-close" id="closeWorkspaceModal">&times;</button>
         </div>
         <form id="addWorkspaceForm" class="modal-form">
+          <!-- Workspace Type Selection -->
+          <div class="form-group">
+            <label>Workspace Type</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" name="workspaceType" value="existing" checked>
+                <span>Existing Folder</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="workspaceType" value="new">
+                <span>Create New Folder</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" name="workspaceType" value="clone">
+                <span>Clone Repository</span>
+              </label>
+            </div>
+          </div>
+
           <div class="form-group">
             <label for="workspaceName">Name</label>
             <input type="text" id="workspaceName" class="input" placeholder="My Project" required>
           </div>
-          <div class="form-group">
+          
+          <!-- Path for existing/new folder -->
+          <div class="form-group" id="pathGroup">
             <label for="workspacePath">Path</label>
             <input type="text" id="workspacePath" class="input" placeholder="/home/user/projects/my-project" required>
+          </div>
+          
+          <!-- Git URL for clone -->
+          <div class="form-group" id="gitUrlGroup" hidden>
+            <label for="workspaceGitUrl">Repository URL</label>
+            <input type="text" id="workspaceGitUrl" class="input" placeholder="https://github.com/user/repo.git">
+          </div>
+          
+          <!-- Target path for clone -->
+          <div class="form-group" id="targetPathGroup" hidden>
+            <label for="workspaceTargetPath">Target Directory (optional)</label>
+            <input type="text" id="workspaceTargetPath" class="input" placeholder="Leave empty for ~/remote-agent-workspaces/">
+          </div>
+          
+          <!-- Git init checkbox for new folder -->
+          <div class="form-group" id="gitInitGroup" hidden>
+            <label class="checkbox-label">
+              <input type="checkbox" id="workspaceInitGit" checked>
+              <span>Initialize Git repository</span>
+            </label>
           </div>
           
           <div class="form-section-header">Default Models</div>
@@ -243,19 +315,16 @@
             <div class="form-group">
               <label for="wsDefaultModel">Prompt Model</label>
               <select id="wsDefaultModel" class="input">
-                <option value="">Use Global Default</option>
               </select>
             </div>
             <div class="form-group">
               <label for="wsValidationModel">Validation Model</label>
               <select id="wsValidationModel" class="input">
-                <option value="">Use Global Default</option>
               </select>
             </div>
             <div class="form-group">
               <label for="wsOutputModel">Output Model</label>
               <select id="wsOutputModel" class="input">
-                <option value="">Use Global Default</option>
               </select>
             </div>
           </div>
@@ -272,7 +341,7 @@
           
           <div class="modal-actions">
             <button type="button" class="btn btn-secondary" id="cancelAddWorkspace">Cancel</button>
-            <button type="submit" class="btn btn-primary">Add Workspace</button>
+            <button type="submit" class="btn btn-primary" id="submitWorkspaceBtn">Add Workspace</button>
           </div>
         </form>
       </div>

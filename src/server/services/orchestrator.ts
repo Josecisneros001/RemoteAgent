@@ -4,7 +4,7 @@ import {
   createSession, getSession, updateSessionCopilotId, updateSessionValidationId, updateSessionOutputId,
   createRun, updateRunPhase, appendLog, updateValidation, getRun, getIncompleteRuns, updateRunCommit 
 } from './run-store.js';
-import { startWatching, stopWatching } from './image-watcher.js';
+import { startWatching, stopWatching, getRunOutputsDir } from './image-watcher.js';
 import { sendNotification } from './push.js';
 import { 
   isGitRepo, generateBranchName, checkoutMainAndPull, createAndCheckoutBranch, 
@@ -216,6 +216,8 @@ export async function startNewSession(
     validationPrompt?: string;
     outputPrompt?: string;
     model?: string;
+    validationModel?: string;
+    outputModel?: string;
     enabledMcps?: string[];
   },
   onEvent: EventCallback
@@ -267,6 +269,8 @@ export async function continueSession(
     validationPrompt?: string;
     outputPrompt?: string;
     model?: string;
+    validationModel?: string;
+    outputModel?: string;
     enabledMcps?: string[];
   },
   onEvent: EventCallback
@@ -411,7 +415,11 @@ async function executePhases(session: Session, run: Run, onEvent: EventCallback,
       await appendLog(run.id, isolationNote);
       onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: isolationNote });
       
-      const outputPhase = await runCopilotPhaseWithRetry(run, session, 'output', outputPrompt, onEvent, {
+      // Augment prompt with the output directory path
+      const outputsDir = getRunOutputsDir(run.id);
+      const augmentedOutputPrompt = `${outputPrompt}\n\nIMPORTANT: Save all generated images/screenshots to this directory: ${outputsDir}`;
+      
+      const outputPhase = await runCopilotPhaseWithRetry(run, session, 'output', augmentedOutputPrompt, onEvent, {
         resumeSession: session.outputSessionId,  // Reuse output session
         mcps: run.enabledMcps,
       }, workspaceConfig);

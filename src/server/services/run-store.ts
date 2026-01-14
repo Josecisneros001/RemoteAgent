@@ -82,6 +82,8 @@ export async function createSession(
     validationPrompt?: string;
     outputPrompt?: string;
     model?: string;
+    validationModel?: string;
+    outputModel?: string;
     enabledMcps?: string[];
   } = {}
 ): Promise<Session> {
@@ -103,8 +105,8 @@ export async function createSession(
     defaultValidationPrompt: options.validationPrompt || workspace.validationPrompt,
     defaultOutputPrompt: options.outputPrompt || workspace.outputPrompt,
     defaultModel: options.model || workspace.defaultModel,
-    validationModel: workspace.validationModel,
-    outputModel: workspace.outputModel,
+    validationModel: options.validationModel || workspace.validationModel,
+    outputModel: options.outputModel || workspace.outputModel,
     enabledMcps: options.enabledMcps,
   };
 

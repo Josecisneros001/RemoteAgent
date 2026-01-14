@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { dirname } from 'path';
 import type { GitChanges, GitFileChange, FileDiff, CommitInfo } from '../types.js';
 
 // Execute a git command and return output
@@ -31,6 +32,24 @@ export async function isGitRepo(workspacePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Check if path is inside a git repository (checks parent directories)
+export async function isInsideGitRepo(path: string): Promise<boolean> {
+  try {
+    // git rev-parse --is-inside-work-tree returns 'true' if inside a git repo
+    const result = await execGit(['rev-parse', '--is-inside-work-tree'], path);
+    return result === 'true';
+  } catch {
+    return false;
+  }
+}
+
+// Initialize a new git repository
+export async function initGitRepo(workspacePath: string): Promise<void> {
+  await execGit(['init'], workspacePath);
+  // Create initial commit so git branch management works
+  await execGit(['commit', '--allow-empty', '-m', 'Initial commit'], workspacePath);
 }
 
 // Get current branch name

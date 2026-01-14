@@ -207,6 +207,8 @@ export interface CreateSessionRequest {
   validationPrompt?: string;
   outputPrompt?: string;
   model?: string;
+  validationModel?: string;
+  outputModel?: string;
   enabledMcps?: string[];
 }
 
@@ -216,6 +218,8 @@ export interface StartRunRequest {
   validationPrompt?: string;
   outputPrompt?: string;
   model?: string;
+  validationModel?: string;
+  outputModel?: string;
   enabledMcps?: string[];
 }
 
@@ -223,4 +227,9 @@ export interface CloneWorkspaceRequest {
   gitUrl: string;
   name: string;
   targetPath?: string;
+  validationPrompt?: string;
+  outputPrompt?: string;
+  defaultModel?: string;
+  validationModel?: string;
+  outputModel?: string;
 }
