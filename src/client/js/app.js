@@ -24,6 +24,11 @@ const workspaceFilter = document.getElementById('workspaceFilter');
 const sessionsList = document.getElementById('sessionsList');
 const notificationBanner = document.getElementById('notificationBanner');
 
+// Runs Sidebar Elements
+const runsSidebar = document.getElementById('runsSidebar');
+const runsList = document.getElementById('runsList');
+const newRunBtn = document.getElementById('newRunBtn');
+
 // Form Elements
 const newSessionForm = document.getElementById('newSessionForm');
 const workspaceSelect = document.getElementById('workspace');
@@ -57,7 +62,8 @@ async function init() {
   await loadConfig();
   await loadSessions();
   setupForms();
-  setupTabs();
+  setupRunsSidebar();
+  setupRunTabs();
   setupNotifications();
   setupWorkspaceModal();
 }
@@ -216,7 +222,9 @@ async function loadSessionRuns(sessionId) {
     const data = await res.json();
     if (data.runs) {
       currentRuns = data.runs;
-      renderRunsTimeline();
+      renderRunsList();
+      // Update run count
+      document.getElementById('sessionRunCount').textContent = `${currentRuns.length} run${currentRuns.length !== 1 ? 's' : ''}`;
     }
   } catch (error) {
     console.error('Failed to load runs:', error);
@@ -230,7 +238,9 @@ async function loadRunDetail(runId) {
     if (data.run) {
       currentRunId = runId;
       renderRunDetail(data.run);
-      switchView('run');
+      showRunDetail(runId);
+      // Reset to run tab
+      switchRunTab('run');
     }
   } catch (error) {
     console.error('Failed to load run:', error);
@@ -253,14 +263,74 @@ function setupForms() {
   newSessionForm?.addEventListener('submit', handleNewSession);
   cancelNewSession?.addEventListener('click', () => switchView('welcome'));
   newRunForm?.addEventListener('submit', handleNewRun);
-  document.getElementById('backToSession')?.addEventListener('click', () => {
-    if (currentSessionId) {
-      loadSessionDetail(currentSessionId);
-    }
-  });
   
   // Load workspace defaults when workspace changes
   workspaceSelect?.addEventListener('change', loadWorkspaceDefaults);
+}
+
+// ==================== RUNS SIDEBAR ====================
+function setupRunsSidebar() {
+  newRunBtn?.addEventListener('click', showNewRunForm);
+}
+
+function showNewRunForm() {
+  // Hide other views and show new run form
+  document.getElementById('view-new-run')?.classList.remove('hidden');
+  document.getElementById('view-run-detail')?.classList.add('hidden');
+  document.getElementById('view-run-empty')?.classList.add('hidden');
+  
+  // Deselect any selected run in sidebar
+  document.querySelectorAll('.run-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  
+  currentRunId = null;
+}
+
+function showRunDetail(runId) {
+  // Hide other views and show run detail
+  document.getElementById('view-new-run')?.classList.add('hidden');
+  document.getElementById('view-run-detail')?.classList.remove('hidden');
+  document.getElementById('view-run-empty')?.classList.add('hidden');
+  
+  // Mark run as active in sidebar
+  document.querySelectorAll('.run-item').forEach(item => {
+    item.classList.toggle('active', item.dataset.runId === runId);
+  });
+}
+
+function showEmptyRunView() {
+  document.getElementById('view-new-run')?.classList.add('hidden');
+  document.getElementById('view-run-detail')?.classList.add('hidden');
+  document.getElementById('view-run-empty')?.classList.remove('hidden');
+  currentRunId = null;
+}
+
+// ==================== RUN TABS ====================
+function setupRunTabs() {
+  document.querySelectorAll('.run-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.runTab;
+      switchRunTab(tab);
+    });
+  });
+}
+
+function switchRunTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('.run-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.runTab === tabName);
+  });
+
+  // Update tab content
+  document.querySelectorAll('.run-tab-content').forEach(content => {
+    content.classList.toggle('hidden', content.id !== `run-tab-${tabName}`);
+  });
+
+  // Load commits data if commits tab is selected
+  if (tabName === 'commits' && currentSessionId) {
+    loadGitChanges(currentSessionId);
+  }
 }
 
 function populateWorkspaces() {
@@ -497,9 +567,9 @@ async function handleNewRun(e) {
     runValidationInput.value = '';
     runOutputInput.value = '';
     
-    // Switch to runs tab and refresh
-    switchTab('runs');
+    // Refresh runs list and show the new run
     loadSessionRuns(currentSessionId);
+    loadRunDetail(data.runId);
 
   } catch (error) {
     console.error('Failed to start run:', error);
@@ -509,38 +579,19 @@ async function handleNewRun(e) {
   }
 }
 
-// ==================== TABS ====================
-function setupTabs() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tab = btn.dataset.tab;
-      switchTab(tab);
-    });
-  });
-}
-
-function switchTab(tabName) {
-  // Update tab buttons
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.tab === tabName);
-  });
-
-  // Update tab content
-  document.querySelectorAll('.tab-content').forEach(content => {
-    content.classList.toggle('hidden', content.id !== `tab-${tabName}`);
-  });
-
-  // Load data for specific tabs
-  if (tabName === 'changes' && currentSessionId) {
-    loadGitChanges(currentSessionId);
-  }
-}
-
 // ==================== VIEWS ====================
 function switchView(viewName) {
   document.querySelectorAll('.view').forEach(view => {
     view.classList.toggle('active', view.id === `view-${viewName}`);
   });
+  
+  // When switching to session view, show empty run view by default if no run selected
+  if (viewName === 'session' && !currentRunId && currentRuns.length > 0) {
+    // Auto-select the most recent run (first in the list since they're sorted desc)
+    loadRunDetail(currentRuns[0].id);
+  } else if (viewName === 'session' && currentRuns.length === 0) {
+    showNewRunForm();
+  }
 }
 
 function showNewSessionForm() {
@@ -581,7 +632,6 @@ function renderSessionDetail() {
   document.getElementById('sessionWorkspace').textContent = 
     config?.workspaces?.find(w => w.id === currentSession.workspaceId)?.name || currentSession.workspaceId;
   document.getElementById('sessionRunCount').textContent = `${currentRuns.length} run${currentRuns.length !== 1 ? 's' : ''}`;
-  document.getElementById('sessionCreated').textContent = `Created: ${formatTime(currentSession.createdAt)}`;
   
   // Show branch name
   const branchEl = document.getElementById('sessionBranch');
@@ -600,45 +650,53 @@ function renderSessionDetail() {
   // Populate run model selects with session's actual models
   populateRunModelSelects();
   
-  renderRunsTimeline();
+  // Render runs in sidebar
+  renderRunsList();
+  
+  // Show appropriate view based on runs
+  if (currentRuns.length === 0) {
+    showNewRunForm();
+  } else if (!currentRunId) {
+    // Auto-select the most recent run
+    loadRunDetail(currentRuns[0].id);
+  }
 }
 
-function renderRunsTimeline() {
-  const container = document.getElementById('runsTimeline');
+function renderRunsList() {
+  const container = document.getElementById('runsList');
   
   if (!currentRuns.length) {
-    container.innerHTML = '<p class="empty-state">No runs yet</p>';
+    container.innerHTML = '<p class="empty-state">No runs yet. Create your first run!</p>';
     return;
   }
 
-  // Reverse to show chronological order (oldest first, newest at bottom)
-  const chronologicalRuns = [...currentRuns].reverse();
-  
-  container.innerHTML = chronologicalRuns.map((run, index) => {
+  // Runs are already sorted by timestamp desc (most recent first)
+  container.innerHTML = currentRuns.map((run, index) => {
+    const runNumber = currentRuns.length - index; // Reverse numbering for display
     const commitHtml = run.commitInfo 
-      ? `<div class="run-commit">
+      ? `<div class="run-item-commit">
            <span class="commit-hash">${escapeHtml(run.commitInfo.shortHash)}</span>
-           <span class="commit-stats">+${run.commitInfo.insertions}/-${run.commitInfo.deletions}</span>
+           <span>+${run.commitInfo.insertions}/-${run.commitInfo.deletions}</span>
          </div>`
       : '';
     
     return `
-      <div class="run-timeline-item" data-run-id="${run.id}">
-        <div class="run-number">#${index + 1}</div>
-        <div class="run-info">
-          <div class="run-prompt-preview">${escapeHtml(run.prompt)}</div>
-          ${commitHtml}
-          <div class="run-meta">
-            <span class="run-status ${run.status}">${run.status}</span>
-            <span>${formatTime(run.createdAt)}</span>
-          </div>
+      <div class="run-item ${run.id === currentRunId ? 'active' : ''}" data-run-id="${run.id}">
+        <div class="run-item-prompt">
+          <span class="run-item-number">#${runNumber}</span>
+          ${escapeHtml(run.prompt)}
+        </div>
+        ${commitHtml}
+        <div class="run-item-meta">
+          <span class="run-status ${run.status}">${run.status}</span>
+          <span>${formatTime(run.createdAt)}</span>
         </div>
       </div>
     `;
   }).join('');
 
   // Add click handlers
-  container.querySelectorAll('.run-timeline-item').forEach(item => {
+  container.querySelectorAll('.run-item').forEach(item => {
     item.addEventListener('click', () => {
       loadRunDetail(item.dataset.runId);
     });
@@ -714,7 +772,7 @@ function renderGitChanges(changes) {
   for (const run of sortedRuns) {
     const commit = run.commitInfo;
     html += `
-      <div class="commit-item">
+      <div class="commit-item" data-run-id="${run.id}">
         <div class="commit-header">
           <span class="commit-hash">${escapeHtml(commit.shortHash)}</span>
           <span class="commit-date">${formatTime(commit.timestamp)}</span>
@@ -725,12 +783,159 @@ function renderGitChanges(changes) {
           <span class="insertions">+${commit.insertions}</span>
           <span class="deletions">-${commit.deletions}</span>
         </div>
+        <div class="commit-files">
+          <div class="commit-files-header">
+            <span>Files Changed</span>
+            <span class="loading-spinner"></span>
+          </div>
+          <div class="commit-files-list"></div>
+        </div>
       </div>
     `;
   }
 
   html += '</div>';
   container.innerHTML = html;
+  
+  // Add click handlers for expandable commits
+  container.querySelectorAll('.commit-item').forEach(item => {
+    item.addEventListener('click', async (e) => {
+      // Don't toggle if clicking on file item or diff
+      if (e.target.closest('.commit-file-item') || e.target.closest('.file-diff-container')) {
+        return;
+      }
+      
+      const runId = item.dataset.runId;
+      const isExpanded = item.classList.contains('expanded');
+      
+      // Collapse all others
+      container.querySelectorAll('.commit-item').forEach(i => i.classList.remove('expanded'));
+      
+      if (!isExpanded) {
+        item.classList.add('expanded');
+        const filesListEl = item.querySelector('.commit-files-list');
+        const spinner = item.querySelector('.loading-spinner');
+        
+        // Load files if not already loaded
+        if (!filesListEl.dataset.loaded) {
+          try {
+            const res = await fetch(`/api/runs/${runId}/commit/files`);
+            const data = await res.json();
+            
+            if (data.files && data.files.length > 0) {
+              filesListEl.innerHTML = data.files.map(file => `
+                <div class="commit-file-item" data-file-path="${escapeHtml(file.path)}" data-run-id="${runId}">
+                  <span class="commit-file-path">${escapeHtml(file.path)}</span>
+                  <div class="commit-file-stats">
+                    <span class="insertions">+${file.insertions}</span>
+                    <span class="deletions">-${file.deletions}</span>
+                  </div>
+                  <span class="commit-file-status ${file.status}">${file.status}</span>
+                </div>
+              `).join('');
+              
+              // Add click handlers for file items
+              filesListEl.querySelectorAll('.commit-file-item').forEach(fileItem => {
+                fileItem.addEventListener('click', async (e) => {
+                  e.stopPropagation();
+                  await showFileDiff(fileItem);
+                });
+              });
+            } else {
+              filesListEl.innerHTML = '<p class="empty-state">No file details available</p>';
+            }
+            filesListEl.dataset.loaded = 'true';
+          } catch (err) {
+            filesListEl.innerHTML = '<p class="empty-state">Failed to load files</p>';
+          }
+          spinner.style.display = 'none';
+        }
+      }
+    });
+  });
+}
+
+// Show file diff in a container below the file item
+async function showFileDiff(fileItem) {
+  const filePath = fileItem.dataset.filePath;
+  const runId = fileItem.dataset.runId;
+  
+  // Check if this file's diff is already shown - toggle it off
+  const existingDiff = fileItem.nextElementSibling;
+  if (existingDiff && existingDiff.classList.contains('file-diff-container')) {
+    existingDiff.remove();
+    return;
+  }
+  
+  // Remove any other existing diff containers
+  document.querySelectorAll('.file-diff-container').forEach(el => el.remove());
+  
+  // Create diff container
+  const diffContainer = document.createElement('div');
+  diffContainer.className = 'file-diff-container';
+  diffContainer.innerHTML = `
+    <div class="file-diff-header">
+      <span>${escapeHtml(filePath)}</span>
+      <button class="file-diff-close">&times;</button>
+    </div>
+    <div class="file-diff-content">
+      <div class="loading-spinner" style="margin: 20px auto; display: block;"></div>
+    </div>
+  `;
+  
+  // Insert after the file item
+  fileItem.after(diffContainer);
+  
+  // Add close handler
+  diffContainer.querySelector('.file-diff-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    diffContainer.remove();
+  });
+  
+  // Load diff
+  try {
+    const res = await fetch(`/api/runs/${runId}/commit/diff?path=${encodeURIComponent(filePath)}`);
+    const data = await res.json();
+    
+    if (data.diff) {
+      const diffContent = diffContainer.querySelector('.file-diff-content');
+      diffContent.innerHTML = renderDiff(data.diff);
+    } else {
+      diffContainer.querySelector('.file-diff-content').innerHTML = 
+        '<p class="empty-state" style="padding: 20px;">No diff available</p>';
+    }
+  } catch (err) {
+    diffContainer.querySelector('.file-diff-content').innerHTML = 
+      '<p class="empty-state" style="padding: 20px;">Failed to load diff</p>';
+  }
+}
+
+// Render git diff with syntax highlighting
+function renderDiff(diff) {
+  const lines = diff.split('\n');
+  let html = '';
+  
+  for (const line of lines) {
+    let className = 'context';
+    
+    if (line.startsWith('+++') || line.startsWith('---')) {
+      // File header - skip
+      continue;
+    } else if (line.startsWith('@@')) {
+      className = 'hunk-header';
+    } else if (line.startsWith('+')) {
+      className = 'addition';
+    } else if (line.startsWith('-')) {
+      className = 'deletion';
+    } else if (line.startsWith('diff ') || line.startsWith('index ')) {
+      // Skip diff metadata
+      continue;
+    }
+    
+    html += `<div class="diff-line ${className}">${escapeHtml(line)}</div>`;
+  }
+  
+  return html || '<p class="empty-state" style="padding: 20px;">Empty diff</p>';
 }
 
 function renderGitSection(title, files) {

@@ -190,6 +190,127 @@ export async function getCommitInfo(workspacePath: string, commitHash: string): 
   };
 }
 
+// Get files changed in a commit with their stats
+export interface CommitFileInfo {
+  path: string;
+  insertions: number;
+  deletions: number;
+  status: 'added' | 'modified' | 'deleted' | 'renamed';
+}
+
+export async function getCommitFiles(workspacePath: string, commitHash: string): Promise<CommitFileInfo[]> {
+  const files: CommitFileInfo[] = [];
+  
+  try {
+    // Get file stats with status
+    const output = await execGit(
+      ['diff-tree', '--no-commit-id', '--name-status', '-r', commitHash],
+      workspacePath
+    );
+    
+    const statusLines = output.split('\n').filter(l => l.trim());
+    const statusMap: Record<string, string> = {};
+    
+    for (const line of statusLines) {
+      const parts = line.split('\t');
+      if (parts.length >= 2) {
+        const status = parts[0].charAt(0);
+        const filePath = parts[parts.length - 1]; // Handle renames (R100 old new)
+        statusMap[filePath] = status;
+      }
+    }
+    
+    // Get numstat for insertions/deletions
+    const numstatOutput = await execGit(
+      ['diff', '--numstat', commitHash + '^', commitHash],
+      workspacePath
+    );
+    
+    const numstatLines = numstatOutput.split('\n').filter(l => l.trim());
+    
+    for (const line of numstatLines) {
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const ins = parseInt(parts[0]) || 0;
+        const del = parseInt(parts[1]) || 0;
+        const filePath = parts[2];
+        
+        const statusChar = statusMap[filePath] || 'M';
+        let status: CommitFileInfo['status'] = 'modified';
+        if (statusChar === 'A') status = 'added';
+        else if (statusChar === 'D') status = 'deleted';
+        else if (statusChar === 'R') status = 'renamed';
+        
+        files.push({
+          path: filePath,
+          insertions: ins,
+          deletions: del,
+          status
+        });
+      }
+    }
+  } catch (e) {
+    // For first commit, use diff-tree with --root
+    try {
+      const output = await execGit(
+        ['diff-tree', '--no-commit-id', '--name-status', '-r', '--root', commitHash],
+        workspacePath
+      );
+      
+      const lines = output.split('\n').filter(l => l.trim());
+      for (const line of lines) {
+        const parts = line.split('\t');
+        if (parts.length >= 2) {
+          const statusChar = parts[0].charAt(0);
+          const filePath = parts[1];
+          
+          let status: CommitFileInfo['status'] = 'modified';
+          if (statusChar === 'A') status = 'added';
+          else if (statusChar === 'D') status = 'deleted';
+          
+          files.push({
+            path: filePath,
+            insertions: 0,
+            deletions: 0,
+            status
+          });
+        }
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+  
+  return files;
+}
+
+// Get diff for a specific file in a commit
+export async function getCommitFileDiff(
+  workspacePath: string, 
+  commitHash: string, 
+  filePath: string
+): Promise<string> {
+  try {
+    // Get the diff for this specific file
+    const diff = await execGit(
+      ['diff', commitHash + '^', commitHash, '--', filePath],
+      workspacePath
+    );
+    return diff;
+  } catch {
+    // For first commit, try with --root
+    try {
+      const diff = await execGit(
+        ['show', commitHash, '--', filePath],
+        workspacePath
+      );
+      return diff;
+    } catch {
+      return '';
+    }
+  }
+}
+
 // Check if there are uncommitted changes
 export async function hasUncommittedChanges(workspacePath: string): Promise<boolean> {
   try {

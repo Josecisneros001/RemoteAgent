@@ -141,103 +141,123 @@
           </form>
         </section>
 
-        <!-- Session Detail View -->
+        <!-- Session Detail View with Runs Sidebar -->
         <section id="view-session" class="view">
-          <div class="session-detail">
-            <!-- Session Header -->
-            <div class="session-header" id="sessionHeader">
-              <div class="session-title">
-                <h2 id="sessionName">Session Name</h2>
-                <span class="session-workspace" id="sessionWorkspace">Workspace</span>
-              </div>
-              <div class="session-meta">
-                <span id="sessionBranch">🌿 branch</span>
-                <span id="sessionRunCount">0 runs</span>
-                <span id="sessionCreated">Created: --</span>
-              </div>
-            </div>
-
-            <!-- Tabs -->
-            <div class="session-tabs">
-              <button class="tab-btn active" data-tab="runs">Runs</button>
-              <button class="tab-btn" data-tab="changes">Commits</button>
-              <button class="tab-btn" data-tab="new-run">+ New Run</button>
-            </div>
-
-            <!-- Runs Tab -->
-            <div class="tab-content" id="tab-runs">
-              <div class="runs-timeline" id="runsTimeline">
-                <p class="empty-state">No runs yet</p>
-              </div>
-            </div>
-
-            <!-- File Changes Tab -->
-            <div class="tab-content hidden" id="tab-changes">
-              <div class="git-changes" id="gitChanges">
-                <p class="empty-state">Loading changes...</p>
-              </div>
-            </div>
-
-            <!-- New Run Tab -->
-            <div class="tab-content hidden" id="tab-new-run">
-              <form id="newRunForm" class="run-form">
-                <div class="form-group">
-                  <label for="runPrompt">Prompt</label>
-                  <textarea id="runPrompt" class="input textarea" rows="3" placeholder="What do you want to do next?" required></textarea>
+          <div class="session-layout">
+            <!-- Runs Sidebar -->
+            <aside class="runs-sidebar" id="runsSidebar">
+              <div class="runs-sidebar-header">
+                <div class="session-info">
+                  <h3 id="sessionName">Session Name</h3>
+                  <span class="session-workspace" id="sessionWorkspace">Workspace</span>
                 </div>
+                <div class="session-meta-compact">
+                  <span id="sessionBranch">🌿 branch</span>
+                  <span id="sessionRunCount">0 runs</span>
+                </div>
+              </div>
 
-                <div class="form-row">
+              <!-- New Run Button (First Item) -->
+              <button class="new-run-btn" id="newRunBtn">
+                <span class="icon">➕</span>
+                <span>New Run</span>
+              </button>
+
+              <!-- Runs List -->
+              <div class="runs-list-container">
+                <div class="runs-list" id="runsList">
+                  <p class="empty-state">No runs yet</p>
+                </div>
+              </div>
+            </aside>
+
+            <!-- Main Run Content -->
+            <div class="run-main-content" id="runMainContent">
+              <!-- New Run Form View (shown when New Run clicked) -->
+              <div class="run-view" id="view-new-run">
+                <div class="view-header">
+                  <h2>New Run</h2>
+                </div>
+                <form id="newRunForm" class="run-form">
                   <div class="form-group">
-                    <label for="runModel">Model</label>
-                    <select id="runModel" class="input">
-                    </select>
+                    <label for="runPrompt">Prompt</label>
+                    <textarea id="runPrompt" class="input textarea" rows="3" placeholder="What do you want to do next?" required></textarea>
                   </div>
-                </div>
 
-                <details class="advanced-options">
-                  <summary>Override Prompts</summary>
-                  
-                  <div class="form-section-header">Model Overrides</div>
                   <div class="form-row">
                     <div class="form-group">
-                      <label for="runValidationModel">Validation Model</label>
-                      <select id="runValidationModel" class="input">
+                      <label for="runModel">Model</label>
+                      <select id="runModel" class="input">
                       </select>
                     </div>
+                  </div>
+
+                  <details class="advanced-options">
+                    <summary>Override Prompts</summary>
+                    
+                    <div class="form-section-header">Model Overrides</div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="runValidationModel">Validation Model</label>
+                        <select id="runValidationModel" class="input">
+                        </select>
+                      </div>
+                      <div class="form-group">
+                        <label for="runOutputModel">Output Model</label>
+                        <select id="runOutputModel" class="input">
+                        </select>
+                      </div>
+                    </div>
+                    
+                    <div class="form-section-header">Prompt Overrides</div>
                     <div class="form-group">
-                      <label for="runOutputModel">Output Model</label>
-                      <select id="runOutputModel" class="input">
-                      </select>
+                      <label for="runValidation">Validation Prompt</label>
+                      <textarea id="runValidation" class="input textarea" rows="2" placeholder="Override validation..."></textarea>
                     </div>
-                  </div>
-                  
-                  <div class="form-section-header">Prompt Overrides</div>
-                  <div class="form-group">
-                    <label for="runValidation">Validation Prompt</label>
-                    <textarea id="runValidation" class="input textarea" rows="2" placeholder="Override validation..."></textarea>
-                  </div>
 
-                  <div class="form-group">
-                    <label for="runOutput">Output Prompt</label>
-                    <textarea id="runOutput" class="input textarea" rows="2" placeholder="Override output generation..."></textarea>
+                    <div class="form-group">
+                      <label for="runOutput">Output Prompt</label>
+                      <textarea id="runOutput" class="input textarea" rows="2" placeholder="Override output generation..."></textarea>
+                    </div>
+                  </details>
+
+                  <button type="submit" class="btn btn-primary" id="startRunBtn">
+                    <span class="btn-text">Start Run</span>
+                    <span class="btn-loading" hidden>Running...</span>
+                  </button>
+                </form>
+              </div>
+
+              <!-- Run Detail View (shown when a run is selected) -->
+              <div class="run-view hidden" id="view-run-detail">
+                <!-- Top Nav for Run/Commits -->
+                <div class="run-tabs">
+                  <button class="run-tab-btn active" data-run-tab="run">Run</button>
+                  <button class="run-tab-btn" data-run-tab="commits">Commits</button>
+                </div>
+
+                <!-- Run Tab Content -->
+                <div class="run-tab-content" id="run-tab-run">
+                  <div class="run-content" id="runContent">
+                    <p class="empty-state">Loading run...</p>
                   </div>
-                </details>
+                </div>
 
-                <button type="submit" class="btn btn-primary" id="startRunBtn">
-                  <span class="btn-text">Start Run</span>
-                  <span class="btn-loading" hidden>Running...</span>
-                </button>
-              </form>
-            </div>
-          </div>
-        </section>
+                <!-- Commits Tab Content -->
+                <div class="run-tab-content hidden" id="run-tab-commits">
+                  <div class="git-changes" id="gitChanges">
+                    <p class="empty-state">Loading commits...</p>
+                  </div>
+                </div>
+              </div>
 
-        <!-- Run Detail View (when clicking on a specific run) -->
-        <section id="view-run" class="view">
-          <div class="run-detail" id="runDetail">
-            <button class="back-btn" id="backToSession">← Back to Session</button>
-            <div class="run-content" id="runContent">
-              <p class="empty-state">Loading run...</p>
+              <!-- Empty State (no run selected) -->
+              <div class="run-view" id="view-run-empty">
+                <div class="empty-run-content">
+                  <h3>👈 Select a run or create a new one</h3>
+                  <p>Click on a run from the sidebar to view details, or click "New Run" to start.</p>
+                </div>
+              </div>
             </div>
           </div>
         </section>

@@ -9,7 +9,7 @@ import { startNewSession, continueSession, abortCurrentRun, getCurrentRunId, get
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
-import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo } from '../services/git.js';
+import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff } from '../services/git.js';
 import type { CreateSessionRequest, StartRunRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -327,6 +327,56 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       });
     }
   });
+
+  // ==================== COMMIT DETAILS ====================
+  
+  // Get files changed in a commit
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/commit/files', async (request, reply) => {
+    const run = await getRun(request.params.runId);
+    if (!run) {
+      return reply.status(404).send({ error: 'Run not found' });
+    }
+    
+    if (!run.commitInfo?.hash) {
+      return reply.status(404).send({ error: 'No commit for this run' });
+    }
+    
+    const session = await getSession(run.sessionId);
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' });
+    }
+    
+    const files = await getCommitFiles(session.workspacePath, run.commitInfo.hash);
+    return { files };
+  });
+
+  // Get diff for a specific file in a commit
+  app.get<{ Params: { runId: string }; Querystring: { path: string } }>(
+    '/api/runs/:runId/commit/diff',
+    async (request, reply) => {
+      const run = await getRun(request.params.runId);
+      if (!run) {
+        return reply.status(404).send({ error: 'Run not found' });
+      }
+      
+      if (!run.commitInfo?.hash) {
+        return reply.status(404).send({ error: 'No commit for this run' });
+      }
+      
+      const { path: filePath } = request.query;
+      if (!filePath) {
+        return reply.status(400).send({ error: 'path query parameter required' });
+      }
+      
+      const session = await getSession(run.sessionId);
+      if (!session) {
+        return reply.status(404).send({ error: 'Session not found' });
+      }
+      
+      const diff = await getCommitFileDiff(session.workspacePath, run.commitInfo.hash, filePath);
+      return { diff };
+    }
+  );
 
   // ==================== IMAGES ====================
   
