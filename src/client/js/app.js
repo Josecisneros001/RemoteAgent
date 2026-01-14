@@ -1,81 +1,92 @@
 // State
 let ws = null;
 let config = null;
-let currentRunId = null;
-let runs = [];
 let sessions = [];
+let currentSessionId = null;
+let currentSession = null;
+let currentRuns = [];
+let currentRunId = null;
+
+// Debounce timers
+let runDetailDebounceTimer = null;
+let sessionRunsDebounceTimer = null;
+const DEBOUNCE_DELAY = 500; // ms
 
 // DOM Elements
+const menuToggle = document.getElementById('menuToggle');
+const sidebar = document.getElementById('sidebar');
+const sidebarOverlay = document.getElementById('sidebarOverlay');
 const connectionStatus = document.getElementById('connectionStatus');
-const workspaceSelect = document.getElementById('workspace');
-const sessionSelect = document.getElementById('session');
-const sessionInfo = document.getElementById('sessionInfo');
-const promptInput = document.getElementById('prompt');
-const validationInput = document.getElementById('validation');
-const imageInstructionsInput = document.getElementById('imageInstructions');
-const submitBtn = document.getElementById('submitBtn');
-const runsList = document.getElementById('runsList');
-const runDetail = document.getElementById('runDetail');
+const connectionStatusDesktop = document.getElementById('connectionStatusDesktop');
+const newSessionBtn = document.getElementById('newSessionBtn');
+const quickStartBtn = document.getElementById('quickStartBtn');
+const workspaceFilter = document.getElementById('workspaceFilter');
+const sessionsList = document.getElementById('sessionsList');
 const notificationBanner = document.getElementById('notificationBanner');
+
+// Form Elements
+const newSessionForm = document.getElementById('newSessionForm');
+const workspaceSelect = document.getElementById('workspace');
+const modelSelect = document.getElementById('model');
+const promptInput = document.getElementById('prompt');
+const validationPromptInput = document.getElementById('validationPrompt');
+const outputPromptInput = document.getElementById('outputPrompt');
+const startSessionBtn = document.getElementById('startSessionBtn');
+const cancelNewSession = document.getElementById('cancelNewSession');
+
+const newRunForm = document.getElementById('newRunForm');
+const runPromptInput = document.getElementById('runPrompt');
+const runModelSelect = document.getElementById('runModel');
+const runValidationInput = document.getElementById('runValidation');
+const runOutputInput = document.getElementById('runOutput');
+const startRunBtn = document.getElementById('startRunBtn');
+
+// Workspace Modal Elements
+const workspaceModal = document.getElementById('workspaceModal');
+const addWorkspaceBtn = document.getElementById('addWorkspaceBtn');
+const closeWorkspaceModalBtn = document.getElementById('closeWorkspaceModal');
+const cancelAddWorkspaceBtn = document.getElementById('cancelAddWorkspace');
+const addWorkspaceForm = document.getElementById('addWorkspaceForm');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
-  setupNavigation();
+  setupSidebar();
   setupWebSocket();
   await loadConfig();
-  await loadRuns();
-  setupForm();
+  await loadSessions();
+  setupForms();
+  setupTabs();
   setupNotifications();
+  setupWorkspaceModal();
 }
 
-// Load sessions for a workspace
-async function loadSessions(workspaceId) {
-  try {
-    const url = workspaceId ? `/api/sessions?workspaceId=${workspaceId}` : '/api/sessions';
-    const res = await fetch(url);
-    const data = await res.json();
-    sessions = data.sessions || [];
-    populateSessions();
-  } catch (error) {
-    console.error('Failed to load sessions:', error);
-    sessions = [];
-    populateSessions();
-  }
-}
-
-// Navigation
-function setupNavigation() {
-  const navBtns = document.querySelectorAll('.nav-btn');
-  navBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-      const view = btn.dataset.view;
-      switchView(view);
-    });
+// ==================== SIDEBAR ====================
+function setupSidebar() {
+  menuToggle?.addEventListener('click', toggleSidebar);
+  sidebarOverlay?.addEventListener('click', closeSidebar);
+  newSessionBtn?.addEventListener('click', showNewSessionForm);
+  quickStartBtn?.addEventListener('click', showNewSessionForm);
+  
+  workspaceFilter?.addEventListener('change', () => {
+    loadSessions(workspaceFilter.value || undefined);
   });
 }
 
-function switchView(viewName) {
-  // Update nav buttons
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.classList.toggle('active', btn.dataset.view === viewName);
-  });
-
-  // Update views
-  document.querySelectorAll('.view').forEach(view => {
-    view.classList.toggle('active', view.id === `view-${viewName}`);
-  });
-
-  // Refresh data when switching views
-  if (viewName === 'history') {
-    loadRuns();
-  } else if (viewName === 'current' && currentRunId) {
-    loadRunDetail(currentRunId);
-  }
+function toggleSidebar() {
+  sidebar?.classList.toggle('open');
+  sidebarOverlay?.classList.toggle('active');
+  menuToggle?.classList.toggle('active');
 }
 
-// WebSocket
+function closeSidebar() {
+  sidebar?.classList.remove('open');
+  sidebarOverlay?.classList.remove('active');
+  menuToggle?.classList.remove('active');
+}
+
+// ==================== WEBSOCKET ====================
 function setupWebSocket() {
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -86,7 +97,6 @@ function setupWebSocket() {
 
   ws.onclose = () => {
     updateConnectionStatus('disconnected');
-    // Reconnect after delay
     setTimeout(setupWebSocket, 3000);
   };
 
@@ -101,55 +111,113 @@ function setupWebSocket() {
 }
 
 function updateConnectionStatus(status) {
-  const dot = connectionStatus.querySelector('.status-dot');
-  const text = connectionStatus.querySelector('.status-text');
-
-  dot.className = 'status-dot ' + status;
-  text.textContent = status === 'connected' ? 'Connected' : 
-                     status === 'disconnected' ? 'Disconnected' : 'Connecting...';
+  [connectionStatus, connectionStatusDesktop].forEach(el => {
+    if (!el) return;
+    const dot = el.querySelector('.status-dot');
+    const text = el.querySelector('.status-text');
+    
+    if (dot) {
+      dot.className = 'status-dot ' + status;
+    }
+    if (text) {
+      text.textContent = status === 'connected' ? 'Connected' : 
+                         status === 'disconnected' ? 'Disconnected' : 'Connecting...';
+    }
+  });
 }
 
 function handleWsEvent(event) {
-  // Update current run view if viewing this run
-  if (currentRunId === event.runId) {
-    loadRunDetail(event.runId);
+  // Update current session/run view if applicable (debounced to prevent excessive API calls)
+  if (event.sessionId === currentSessionId) {
+    if (event.runId === currentRunId) {
+      // Debounce run detail updates
+      clearTimeout(runDetailDebounceTimer);
+      runDetailDebounceTimer = setTimeout(() => {
+        loadRunDetail(event.runId);
+      }, DEBOUNCE_DELAY);
+    } else {
+      // Debounce session runs updates
+      clearTimeout(sessionRunsDebounceTimer);
+      sessionRunsDebounceTimer = setTimeout(() => {
+        loadSessionRuns(currentSessionId);
+      }, DEBOUNCE_DELAY);
+    }
   }
 
-  // Handle specific events
   switch (event.type) {
     case 'complete':
-      submitBtn.disabled = false;
-      submitBtn.classList.remove('loading');
-      loadRuns();
-      loadSessions(workspaceSelect.value);  // Refresh sessions
+      startSessionBtn.disabled = false;
+      startSessionBtn.classList.remove('loading');
+      startRunBtn.disabled = false;
+      startRunBtn.classList.remove('loading');
+      loadSessions();
       break;
     case 'phase':
-      // If a run just started, switch to current view
       if (event.phase === 'prompt' && !currentRunId) {
         currentRunId = event.runId;
-        switchView('current');
+        currentSessionId = event.sessionId;
+        loadSessionDetail(event.sessionId);
       }
       break;
   }
 }
 
-// API
+// ==================== API ====================
 async function loadConfig() {
   try {
     const res = await fetch('/api/config');
     config = await res.json();
     populateWorkspaces();
+    populateModels();
   } catch (error) {
     console.error('Failed to load config:', error);
   }
 }
 
-async function loadRuns() {
+async function loadSessions(workspaceId) {
   try {
-    const res = await fetch('/api/runs');
+    const url = workspaceId ? `/api/sessions?workspaceId=${workspaceId}` : '/api/sessions';
+    const res = await fetch(url);
     const data = await res.json();
-    runs = data.runs || [];
-    renderRunsList();
+    sessions = data.sessions || [];
+    renderSessionsList();
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+    sessions = [];
+    renderSessionsList();
+  }
+}
+
+async function loadSessionDetail(sessionId) {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`);
+    const data = await res.json();
+    if (data.session) {
+      currentSessionId = sessionId;
+      currentSession = data.session;
+      currentRuns = data.runs || [];
+      renderSessionDetail();
+      switchView('session');
+      closeSidebar();
+      
+      // Mark session as active in sidebar
+      document.querySelectorAll('.session-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.sessionId === sessionId);
+      });
+    }
+  } catch (error) {
+    console.error('Failed to load session:', error);
+  }
+}
+
+async function loadSessionRuns(sessionId) {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}`);
+    const data = await res.json();
+    if (data.runs) {
+      currentRuns = data.runs;
+      renderRunsTimeline();
+    }
   } catch (error) {
     console.error('Failed to load runs:', error);
   }
@@ -162,110 +230,115 @@ async function loadRunDetail(runId) {
     if (data.run) {
       currentRunId = runId;
       renderRunDetail(data.run);
+      switchView('run');
     }
   } catch (error) {
     console.error('Failed to load run:', error);
   }
 }
 
-// Form
-function setupForm() {
-  submitBtn.addEventListener('click', submitRun);
+async function loadGitChanges(sessionId) {
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/git/changes`);
+    const data = await res.json();
+    renderGitChanges(data.changes);
+  } catch (error) {
+    console.error('Failed to load git changes:', error);
+    renderGitChanges(null);
+  }
+}
+
+// ==================== FORMS ====================
+function setupForms() {
+  newSessionForm?.addEventListener('submit', handleNewSession);
+  cancelNewSession?.addEventListener('click', () => switchView('welcome'));
+  newRunForm?.addEventListener('submit', handleNewRun);
+  document.getElementById('backToSession')?.addEventListener('click', () => {
+    if (currentSessionId) {
+      loadSessionDetail(currentSessionId);
+    }
+  });
+  
+  // Load workspace defaults when workspace changes
+  workspaceSelect?.addEventListener('change', loadWorkspaceDefaults);
 }
 
 function populateWorkspaces() {
-  workspaceSelect.innerHTML = '';
+  // Populate form select
+  workspaceSelect.innerHTML = '<option value="">Select a workspace...</option>';
   
-  if (!config?.workspaces?.length) {
-    workspaceSelect.innerHTML = '<option value="">No workspaces configured</option>';
-    return;
-  }
+  // Populate filter select
+  workspaceFilter.innerHTML = '<option value="">All Workspaces</option>';
+  
+  if (!config?.workspaces?.length) return;
 
   config.workspaces.forEach(ws => {
-    const option = document.createElement('option');
-    option.value = ws.id;
-    option.textContent = ws.name;
-    workspaceSelect.appendChild(option);
-  });
-  
-  // Load sessions and defaults for first workspace
-  if (config.workspaces.length > 0) {
-    loadSessions(config.workspaces[0].id);
-    loadWorkspaceDefaults(config.workspaces[0].id);
-  }
-  
-  // Reload sessions and defaults when workspace changes
-  workspaceSelect.addEventListener('change', () => {
-    const wsId = workspaceSelect.value;
-    loadSessions(wsId);
-    loadWorkspaceDefaults(wsId);
+    const option1 = document.createElement('option');
+    option1.value = ws.id;
+    option1.textContent = ws.name;
+    workspaceSelect.appendChild(option1);
+    
+    const option2 = document.createElement('option');
+    option2.value = ws.id;
+    option2.textContent = ws.name;
+    workspaceFilter.appendChild(option2);
   });
 }
 
-// Load workspace default prompts into UI
-function loadWorkspaceDefaults(workspaceId) {
-  const workspace = config.workspaces.find(w => w.id === workspaceId);
+function populateModels() {
+  const models = config?.availableModels || [];
+  const defaultModel = config?.defaultModel || '';
+  
+  [modelSelect, runModelSelect].forEach(select => {
+    if (!select) return;
+    
+    const isRunModel = select === runModelSelect;
+    select.innerHTML = isRunModel 
+      ? '<option value="">Use session default</option>'
+      : `<option value="">Default (${defaultModel})</option>`;
+    
+    models.forEach(model => {
+      const option = document.createElement('option');
+      option.value = model;
+      option.textContent = model;
+      select.appendChild(option);
+    });
+  });
+}
+
+function loadWorkspaceDefaults() {
+  const wsId = workspaceSelect.value;
+  const workspace = config?.workspaces?.find(w => w.id === wsId);
   if (!workspace) return;
   
-  // Load workspace defaults into the form
-  validationInput.value = workspace.validationPrompt || '';
-  imageInstructionsInput.value = workspace.outputPrompt || '';
+  validationPromptInput.value = workspace.validationPrompt || '';
+  outputPromptInput.value = workspace.outputPrompt || '';
 }
 
-function populateSessions() {
-  sessionSelect.innerHTML = '<option value="">✨ New Session</option>';
+async function handleNewSession(e) {
+  e.preventDefault();
   
-  sessions.forEach(session => {
-    const option = document.createElement('option');
-    option.value = session.id;
-    option.textContent = `📂 ${session.id.slice(0, 8)}... - ${session.lastPrompt.slice(0, 30)}...`;
-    sessionSelect.appendChild(option);
-  });
-  
-  // Show/hide session info
-  sessionSelect.addEventListener('change', updateSessionInfo);
-  updateSessionInfo();
-}
-
-function updateSessionInfo() {
-  const selectedId = sessionSelect.value;
-  if (!selectedId) {
-    sessionInfo.hidden = true;
-    return;
-  }
-  
-  const session = sessions.find(s => s.id === selectedId);
-  if (session) {
-    sessionInfo.textContent = `Last used: ${formatTime(session.updatedAt)} | "${session.lastPrompt}"`;
-    sessionInfo.hidden = false;
-  } else {
-    sessionInfo.hidden = true;
-  }
-}
-
-async function submitRun() {
   const workspaceId = workspaceSelect.value;
   const prompt = promptInput.value.trim();
-  const continueSession = sessionSelect.value || undefined;
   
   if (!workspaceId || !prompt) {
     alert('Please select a workspace and enter a prompt');
     return;
   }
 
-  submitBtn.disabled = true;
-  submitBtn.classList.add('loading');
+  startSessionBtn.disabled = true;
+  startSessionBtn.classList.add('loading');
 
   try {
-    const res = await fetch('/api/run', {
+    const res = await fetch('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         workspaceId,
         prompt,
-        validationInstructions: validationInput.value.trim(),
-        imageInstructions: imageInstructionsInput.value.trim(),
-        continueSession,
+        validationPrompt: validationPromptInput.value.trim() || undefined,
+        outputPrompt: outputPromptInput.value.trim() || undefined,
+        model: modelSelect.value || undefined,
       }),
     });
 
@@ -273,62 +346,335 @@ async function submitRun() {
     
     if (data.error) {
       alert(data.error);
-      submitBtn.disabled = false;
-      submitBtn.classList.remove('loading');
+      startSessionBtn.disabled = false;
+      startSessionBtn.classList.remove('loading');
+      return;
+    }
+
+    currentSessionId = data.sessionId;
+    currentRunId = data.runId;
+    
+    // Clear form
+    promptInput.value = '';
+    
+    // Load the new session
+    loadSessionDetail(data.sessionId);
+    loadSessions();
+
+  } catch (error) {
+    console.error('Failed to start session:', error);
+    alert('Failed to start session');
+    startSessionBtn.disabled = false;
+    startSessionBtn.classList.remove('loading');
+  }
+}
+
+async function handleNewRun(e) {
+  e.preventDefault();
+  
+  if (!currentSessionId) {
+    alert('No session selected');
+    return;
+  }
+  
+  const prompt = runPromptInput.value.trim();
+  if (!prompt) {
+    alert('Please enter a prompt');
+    return;
+  }
+
+  startRunBtn.disabled = true;
+  startRunBtn.classList.add('loading');
+
+  try {
+    const res = await fetch(`/api/sessions/${currentSessionId}/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: currentSessionId,
+        prompt,
+        validationPrompt: runValidationInput.value.trim() || undefined,
+        outputPrompt: runOutputInput.value.trim() || undefined,
+        model: runModelSelect.value || undefined,
+      }),
+    });
+
+    const data = await res.json();
+    
+    if (data.error) {
+      alert(data.error);
+      startRunBtn.disabled = false;
+      startRunBtn.classList.remove('loading');
       return;
     }
 
     currentRunId = data.runId;
-    switchView('current');
     
     // Clear form
-    promptInput.value = '';
-    validationInput.value = '';
-    imageInstructionsInput.value = '';
+    runPromptInput.value = '';
+    runValidationInput.value = '';
+    runOutputInput.value = '';
+    
+    // Switch to runs tab and refresh
+    switchTab('runs');
+    loadSessionRuns(currentSessionId);
 
   } catch (error) {
     console.error('Failed to start run:', error);
     alert('Failed to start run');
-    submitBtn.disabled = false;
-    submitBtn.classList.remove('loading');
+    startRunBtn.disabled = false;
+    startRunBtn.classList.remove('loading');
   }
 }
 
-// Rendering
-function renderRunsList() {
-  if (!runs.length) {
-    runsList.innerHTML = '<p class="empty-state">No runs yet. Start one!</p>';
-    return;
-  }
-
-  runsList.innerHTML = runs.map(run => `
-    <div class="run-item" data-run-id="${run.id}">
-      <div class="run-item-header">
-        <span class="run-workspace">${escapeHtml(run.workspaceName)}</span>
-        <span class="run-status ${run.status}">${run.status}</span>
-      </div>
-      <p class="run-prompt">${escapeHtml(run.prompt)}</p>
-      <p class="run-time">${formatTime(run.createdAt)}</p>
-    </div>
-  `).join('');
-
-  // Add click handlers
-  runsList.querySelectorAll('.run-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const runId = item.dataset.runId;
-      loadRunDetail(runId);
-      switchView('current');
+// ==================== TABS ====================
+function setupTabs() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tab = btn.dataset.tab;
+      switchTab(tab);
     });
   });
 }
 
+function switchTab(tabName) {
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabName);
+  });
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.toggle('hidden', content.id !== `tab-${tabName}`);
+  });
+
+  // Load data for specific tabs
+  if (tabName === 'changes' && currentSessionId) {
+    loadGitChanges(currentSessionId);
+  }
+}
+
+// ==================== VIEWS ====================
+function switchView(viewName) {
+  document.querySelectorAll('.view').forEach(view => {
+    view.classList.toggle('active', view.id === `view-${viewName}`);
+  });
+}
+
+function showNewSessionForm() {
+  switchView('new-session');
+  closeSidebar();
+}
+
+// ==================== RENDERING ====================
+function renderSessionsList() {
+  if (!sessions.length) {
+    sessionsList.innerHTML = '<p class="empty-state">No sessions yet</p>';
+    return;
+  }
+
+  sessionsList.innerHTML = sessions.map(session => `
+    <div class="session-item ${session.id === currentSessionId ? 'active' : ''}" data-session-id="${session.id}">
+      <div class="session-item-name">${escapeHtml(session.friendlyName)}</div>
+      <div class="session-item-branch">🌿 ${escapeHtml(session.branchName || 'no branch')}</div>
+      <div class="session-item-meta">
+        <span>${session.runCount} run${session.runCount !== 1 ? 's' : ''}</span>
+        ${session.lastRunStatus ? `<span class="session-item-status ${session.lastRunStatus}">${session.lastRunStatus}</span>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  // Add click handlers
+  sessionsList.querySelectorAll('.session-item').forEach(item => {
+    item.addEventListener('click', () => {
+      loadSessionDetail(item.dataset.sessionId);
+    });
+  });
+}
+
+function renderSessionDetail() {
+  if (!currentSession) return;
+  
+  document.getElementById('sessionName').textContent = currentSession.friendlyName;
+  document.getElementById('sessionWorkspace').textContent = 
+    config?.workspaces?.find(w => w.id === currentSession.workspaceId)?.name || currentSession.workspaceId;
+  document.getElementById('sessionRunCount').textContent = `${currentRuns.length} run${currentRuns.length !== 1 ? 's' : ''}`;
+  document.getElementById('sessionCreated').textContent = `Created: ${formatTime(currentSession.createdAt)}`;
+  
+  // Show branch name
+  const branchEl = document.getElementById('sessionBranch');
+  if (branchEl) {
+    branchEl.textContent = `🌿 ${currentSession.branchName || 'no branch'}`;
+  }
+  
+  // Pre-fill run form with session defaults
+  if (currentSession.defaultValidationPrompt) {
+    runValidationInput.value = currentSession.defaultValidationPrompt;
+  }
+  if (currentSession.defaultOutputPrompt) {
+    runOutputInput.value = currentSession.defaultOutputPrompt;
+  }
+  
+  renderRunsTimeline();
+}
+
+function renderRunsTimeline() {
+  const container = document.getElementById('runsTimeline');
+  
+  if (!currentRuns.length) {
+    container.innerHTML = '<p class="empty-state">No runs yet</p>';
+    return;
+  }
+
+  // Reverse to show chronological order (oldest first, newest at bottom)
+  const chronologicalRuns = [...currentRuns].reverse();
+  
+  container.innerHTML = chronologicalRuns.map((run, index) => {
+    const commitHtml = run.commitInfo 
+      ? `<div class="run-commit">
+           <span class="commit-hash">${escapeHtml(run.commitInfo.shortHash)}</span>
+           <span class="commit-stats">+${run.commitInfo.insertions}/-${run.commitInfo.deletions}</span>
+         </div>`
+      : '';
+    
+    return `
+      <div class="run-timeline-item" data-run-id="${run.id}">
+        <div class="run-number">#${index + 1}</div>
+        <div class="run-info">
+          <div class="run-prompt-preview">${escapeHtml(run.prompt)}</div>
+          ${commitHtml}
+          <div class="run-meta">
+            <span class="run-status ${run.status}">${run.status}</span>
+            <span>${formatTime(run.createdAt)}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Add click handlers
+  container.querySelectorAll('.run-timeline-item').forEach(item => {
+    item.addEventListener('click', () => {
+      loadRunDetail(item.dataset.runId);
+    });
+  });
+}
+
+function renderGitChanges(changes) {
+  const container = document.getElementById('gitChanges');
+  
+  // Show commit history from runs instead of dirty changes
+  const runsWithCommits = currentRuns.filter(r => r.commitInfo);
+  
+  if (runsWithCommits.length === 0) {
+    // Fall back to showing current dirty state if no commits yet
+    if (!changes || changes.branch === 'not a git repo') {
+      container.innerHTML = '<p class="empty-state">Not a git repository</p>';
+      return;
+    }
+
+    const hasStagedChanges = changes.staged?.length > 0;
+    const hasUnstagedChanges = changes.unstaged?.length > 0;
+    const hasUntrackedChanges = changes.untracked?.length > 0;
+    const hasAnyChanges = hasStagedChanges || hasUnstagedChanges || hasUntrackedChanges;
+
+    if (!hasAnyChanges) {
+      container.innerHTML = `
+        <div class="git-branch">
+          Branch: <span class="git-branch-name">${escapeHtml(changes.branch)}</span>
+        </div>
+        <p class="empty-state">No changes yet - run a prompt to make changes</p>
+      `;
+      return;
+    }
+
+    // Show dirty changes (shouldn't happen normally since we commit after each run)
+    let html = `
+      <div class="git-branch">
+        Branch: <span class="git-branch-name">${escapeHtml(changes.branch)}</span>
+        <span class="uncommitted-badge">uncommitted</span>
+      </div>
+    `;
+
+    if (hasStagedChanges) {
+      html += renderGitSection('Staged Changes', changes.staged);
+    }
+    if (hasUnstagedChanges) {
+      html += renderGitSection('Unstaged Changes', changes.unstaged);
+    }
+    if (hasUntrackedChanges) {
+      html += renderGitSection('Untracked Files', changes.untracked);
+    }
+
+    container.innerHTML = html;
+    return;
+  }
+
+  // Show commit history
+  const branchName = currentSession?.branchName || changes?.branch || 'unknown';
+  
+  let html = `
+    <div class="git-branch">
+      Branch: <span class="git-branch-name">${escapeHtml(branchName)}</span>
+      <span class="commits-count">${runsWithCommits.length} commit${runsWithCommits.length !== 1 ? 's' : ''}</span>
+    </div>
+    <div class="commits-list">
+  `;
+
+  // Show commits in chronological order (oldest first)
+  const sortedRuns = [...runsWithCommits].sort((a, b) => 
+    new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  for (const run of sortedRuns) {
+    const commit = run.commitInfo;
+    html += `
+      <div class="commit-item">
+        <div class="commit-header">
+          <span class="commit-hash">${escapeHtml(commit.shortHash)}</span>
+          <span class="commit-date">${formatTime(commit.timestamp)}</span>
+        </div>
+        <div class="commit-message">${escapeHtml(commit.message)}</div>
+        <div class="commit-stats">
+          <span class="files-changed">${commit.filesChanged} file${commit.filesChanged !== 1 ? 's' : ''}</span>
+          <span class="insertions">+${commit.insertions}</span>
+          <span class="deletions">-${commit.deletions}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+function renderGitSection(title, files) {
+  return `
+    <div class="git-section">
+      <div class="git-section-header">
+        <span>${title}</span>
+        <span>${files.length} file${files.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div class="git-file-list">
+        ${files.map(file => `
+          <div class="git-file">
+            <span>${escapeHtml(file.path)}</span>
+            <span class="git-file-status ${file.status}">${file.status}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function renderRunDetail(run) {
+  const container = document.getElementById('runContent');
+  
   // Helper to combine and render logs for a specific phase
   function renderPhaseLogs(logs, phase) {
     const phaseLogs = logs.filter(l => l.phase === phase);
     if (phaseLogs.length === 0) return '';
     
-    // Combine consecutive stdout entries for better markdown parsing
     const combined = [];
     let currentStdout = '';
     
@@ -358,10 +704,33 @@ function renderRunDetail(run) {
     }).join('');
   }
   
-  // Render logs by phase
   const promptLogsHtml = renderPhaseLogs(run.logs, 'prompt');
   const validationLogsHtml = renderPhaseLogs(run.logs, 'validation');
   const outputLogsHtml = renderPhaseLogs(run.logs, 'output');
+
+  // Build commit info section
+  const commitHtml = run.commitInfo ? `
+    <div class="section">
+      <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        📦 Git Commit
+      </div>
+      <div class="section-content">
+        <div class="commit-detail">
+          <div class="commit-detail-header">
+            <span class="commit-hash-large">${escapeHtml(run.commitInfo.shortHash)}</span>
+            <span class="commit-branch">${escapeHtml(run.commitInfo.branch)}</span>
+          </div>
+          <div class="commit-message-large">${escapeHtml(run.commitInfo.message)}</div>
+          <div class="commit-stats-detail">
+            <span>${run.commitInfo.filesChanged} file${run.commitInfo.filesChanged !== 1 ? 's' : ''} changed</span>
+            <span class="insertions">+${run.commitInfo.insertions} insertions</span>
+            <span class="deletions">-${run.commitInfo.deletions} deletions</span>
+          </div>
+          <div class="commit-date">${formatTime(run.commitInfo.timestamp)}</div>
+        </div>
+      </div>
+    </div>
+  ` : '';
 
   const imagesHtml = run.images.length ? 
     `<div class="images-grid">
@@ -373,75 +742,80 @@ function renderRunDetail(run) {
     </div>` : 
     '<p class="empty-state">No images generated</p>';
 
-  const sessionHtml = run.sessionId ? 
-    `<span class="run-session">Session: ${run.sessionId.slice(0, 8)}...</span>` : '';
-  
-  const continuedHtml = run.continueSession ?
-    `<span>Continued from: ${run.continueSession.slice(0, 8)}...</span>` : '';
-
-  runDetail.innerHTML = `
-    <div class="run-detail-grid">
-      <div class="detail-header">
-        <h2>${escapeHtml(run.prompt.slice(0, 100))}${run.prompt.length > 100 ? '...' : ''}</h2>
-        <div class="detail-meta">
-          <span class="run-status ${run.status}">${run.status}</span>
-          <span>${formatTime(run.createdAt)}</span>
-          ${sessionHtml}
-          ${continuedHtml}
-        </div>
+  container.innerHTML = `
+    <div class="detail-header">
+      <h2>${escapeHtml(run.prompt)}</h2>
+      <div class="detail-meta">
+        <span class="run-status ${run.status}">${run.status}</span>
+        <span>${formatTime(run.createdAt)}</span>
+        ${run.model ? `<span>Model: ${escapeHtml(run.model)}</span>` : ''}
       </div>
-
-      <div class="section">
-        <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-          Prompt Output
-        </div>
-        <div class="section-content">
-          <div class="logs">${promptLogsHtml || '<p class="empty-state">No output yet</p>'}</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-          Validation
-        </div>
-        <div class="section-content">
-          <div class="validation-status ${run.validation.status}">
-            ${getValidationIcon(run.validation.status)}
-            ${run.validation.status.toUpperCase()}
-          </div>
-          ${validationLogsHtml ? `<div class="logs" style="margin-top: 12px">${validationLogsHtml}</div>` : ''}
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-          Image Generation Logs
-        </div>
-        <div class="section-content">
-          <div class="logs">${outputLogsHtml || '<p class="empty-state">No output logs yet</p>'}</div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-          Generated Images
-        </div>
-        <div class="section-content">
-          ${imagesHtml}
-        </div>
-      </div>
-
-      ${run.status !== 'completed' && run.status !== 'failed' ? `
-        <button class="btn btn-secondary" onclick="abortRun()">Abort Run</button>
-      ` : ''}
     </div>
+
+    <div class="section">
+      <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        Prompt Output
+      </div>
+      <div class="section-content">
+        <div class="logs">${promptLogsHtml || '<p class="empty-state">No output yet</p>'}</div>
+      </div>
+    </div>
+
+    ${commitHtml}
+
+    <div class="section">
+      <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        Validation
+      </div>
+      <div class="section-content">
+        <div class="validation-status ${run.validation.status}">
+          ${getValidationIcon(run.validation.status)}
+          ${run.validation.status.toUpperCase()}
+        </div>
+        ${validationLogsHtml ? `<div class="logs" style="margin-top: 12px">${validationLogsHtml}</div>` : ''}
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        Output Generation
+      </div>
+      <div class="section-content">
+        <div class="logs">${outputLogsHtml || '<p class="empty-state">No output logs</p>'}</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+        Generated Images
+      </div>
+      <div class="section-content">
+        ${imagesHtml}
+      </div>
+    </div>
+
+    ${run.status !== 'completed' && run.status !== 'failed' ? `
+      <button class="btn btn-secondary" onclick="abortRun()">Abort Run</button>
+    ` : ''}
   `;
 
   // Add image click handlers
-  runDetail.querySelectorAll('.image-item').forEach(item => {
+  container.querySelectorAll('.image-item').forEach(item => {
     item.addEventListener('click', () => {
       openImageModal(item.dataset.src);
     });
+  });
+  
+  // Auto-scroll logs to bottom if run is still in progress
+  if (run.status !== 'completed' && run.status !== 'failed') {
+    scrollLogsToBottom();
+  }
+}
+
+// Scroll all log containers to bottom
+function scrollLogsToBottom() {
+  document.querySelectorAll('.logs').forEach(logsEl => {
+    logsEl.scrollTop = logsEl.scrollHeight;
   });
 }
 
@@ -455,7 +829,7 @@ function getValidationIcon(status) {
   }
 }
 
-// Image Modal
+// ==================== IMAGE MODAL ====================
 function openImageModal(src) {
   const modal = document.createElement('div');
   modal.className = 'modal';
@@ -469,19 +843,117 @@ function openImageModal(src) {
   document.body.appendChild(modal);
 }
 
-// Abort
+// ==================== ABORT ====================
 async function abortRun() {
   if (!confirm('Are you sure you want to abort the current run?')) return;
   
   try {
     await fetch('/api/run/abort', { method: 'POST' });
-    loadRunDetail(currentRunId);
+    if (currentRunId) {
+      loadRunDetail(currentRunId);
+    }
   } catch (error) {
     console.error('Failed to abort:', error);
   }
 }
 
-// Notifications
+// ==================== WORKSPACE MODAL ====================
+function setupWorkspaceModal() {
+  addWorkspaceBtn?.addEventListener('click', openWorkspaceModal);
+
+  closeWorkspaceModalBtn?.addEventListener('click', closeWorkspaceModal);
+  cancelAddWorkspaceBtn?.addEventListener('click', closeWorkspaceModal);
+
+  // Close on backdrop click
+  workspaceModal?.querySelector('.modal-backdrop')?.addEventListener('click', closeWorkspaceModal);
+
+  addWorkspaceForm?.addEventListener('submit', handleAddWorkspace);
+}
+
+function openWorkspaceModal() {
+  // Populate model selects with actual default values
+  const wsDefaultModel = document.getElementById('wsDefaultModel');
+  const wsValidationModel = document.getElementById('wsValidationModel');
+  const wsOutputModel = document.getElementById('wsOutputModel');
+  
+  const modelSelects = [
+    { el: wsDefaultModel, defaultKey: 'defaultModel' },
+    { el: wsValidationModel, defaultKey: 'defaultValidationModel' },
+    { el: wsOutputModel, defaultKey: 'defaultOutputModel' },
+  ];
+  
+  modelSelects.forEach(({ el, defaultKey }) => {
+    if (el && config?.availableModels) {
+      const globalDefault = config[defaultKey] || config.defaultModel;
+      el.innerHTML = '';
+      config.availableModels.forEach(model => {
+        const option = document.createElement('option');
+        option.value = model;
+        option.textContent = model === globalDefault ? `${model} (default)` : model;
+        if (model === globalDefault) option.selected = true;
+        el.appendChild(option);
+      });
+    }
+  });
+  
+  workspaceModal.hidden = false;
+}
+
+function closeWorkspaceModal() {
+  workspaceModal.hidden = true;
+  addWorkspaceForm?.reset();
+}
+
+async function handleAddWorkspace(e) {
+  e.preventDefault();
+
+  const name = document.getElementById('workspaceName')?.value.trim();
+  const path = document.getElementById('workspacePath')?.value.trim();
+  const validationPrompt = document.getElementById('workspaceValidation')?.value.trim() || undefined;
+  const outputPrompt = document.getElementById('workspaceOutput')?.value.trim() || undefined;
+  const defaultModel = document.getElementById('wsDefaultModel')?.value || undefined;
+  const validationModel = document.getElementById('wsValidationModel')?.value || undefined;
+  const outputModel = document.getElementById('wsOutputModel')?.value || undefined;
+
+  if (!name || !path) return;
+
+  try {
+    const res = await fetch('/api/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        name, 
+        path, 
+        validationPrompt, 
+        outputPrompt,
+        defaultModel,
+        validationModel,
+        outputModel,
+      }),
+    });
+
+    if (!res.ok) {
+      const error = await res.json();
+      alert(error.error || 'Failed to add workspace');
+      return;
+    }
+
+    // Reload config to get updated workspace list
+    await loadConfig();
+    closeWorkspaceModal();
+    
+    // Select the new workspace
+    if (workspaceSelect) {
+      workspaceSelect.value = path;
+      loadWorkspaceDefaults();
+    }
+  } catch (error) {
+    console.error('Failed to add workspace:', error);
+    alert('Failed to add workspace');
+  }
+}
+
+// ==================== NOTIFICATIONS ====================
 function setupNotifications() {
   if (!('Notification' in window) || !('serviceWorker' in navigator)) {
     return;
@@ -503,7 +975,6 @@ function setupNotifications() {
     notificationBanner.hidden = true;
   });
 
-  // Register service worker
   if (Notification.permission === 'granted') {
     subscribeToPush();
   }
@@ -513,7 +984,6 @@ async function subscribeToPush() {
   try {
     const registration = await navigator.serviceWorker.register('/sw.js');
     
-    // Get VAPID key
     const res = await fetch('/api/push/vapid-key');
     const { publicKey } = await res.json();
     
@@ -524,7 +994,6 @@ async function subscribeToPush() {
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
 
-    // Send subscription to server
     await fetch('/api/push/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -537,53 +1006,35 @@ async function subscribeToPush() {
   }
 }
 
-// Utilities
+// ==================== UTILITIES ====================
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
 }
 
-// Simple markdown to HTML converter
 function simpleMarkdown(text) {
   if (!text) return '';
   
-  // Escape HTML first for security
   let html = escapeHtml(text);
   
-  // Convert markdown patterns
-  // Bold: **text** or __text__
   html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
-  
-  // Italic: *text* or _text_
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
   html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
-  
-  // Inline code: `code`
   html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  
-  // Headers: # ## ### etc
   html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
   html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
   html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-  
-  // Unordered lists: - item or * item
   html = html.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
-  
-  // Wrap consecutive <li> in <ul>
   html = html.replace(/(<li>.+<\/li>\n?)+/g, '<ul>$&</ul>');
-  
-  // Line breaks: double newline = paragraph break
   html = html.replace(/\n\n/g, '</p><p>');
   html = html.replace(/\n/g, '<br>');
   
-  // Wrap in paragraph if content exists
   if (html.trim()) {
     html = '<p>' + html + '</p>';
   }
   
-  // Clean up empty paragraphs
   html = html.replace(/<p><\/p>/g, '');
   html = html.replace(/<p>\s*<br>\s*<\/p>/g, '');
   

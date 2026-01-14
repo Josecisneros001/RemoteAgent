@@ -12,85 +12,206 @@
 </head>
 <body>
   <div id="app">
-    <!-- Header -->
-    <header class="header">
+    <!-- Mobile Header (visible on mobile only) -->
+    <header class="mobile-header">
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">
+        <span></span><span></span><span></span>
+      </button>
       <h1>🤖 Remote Agent</h1>
       <div class="connection-status" id="connectionStatus">
         <span class="status-dot"></span>
-        <span class="status-text">Connecting...</span>
       </div>
     </header>
 
-    <!-- Navigation -->
-    <nav class="nav">
-      <button class="nav-btn active" data-view="new-run">New Run</button>
-      <button class="nav-btn" data-view="history">History</button>
-      <button class="nav-btn" data-view="current">Current</button>
-    </nav>
+    <div class="app-container">
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <h1>🤖 Remote Agent</h1>
+          <div class="connection-status desktop-only" id="connectionStatusDesktop">
+            <span class="status-dot"></span>
+            <span class="status-text">Connecting...</span>
+          </div>
+        </div>
 
-    <!-- Views Container -->
-    <main class="views">
-      <!-- New Run View -->
-      <section id="view-new-run" class="view active">
-        <div class="view-new-run-grid">
-          <div class="form-group">
-            <label for="workspace">Workspace</label>
-            <select id="workspace" class="input">
-              <option value="">Loading workspaces...</option>
+        <!-- New Session Button -->
+        <button class="new-session-btn" id="newSessionBtn">
+          <span class="icon">➕</span>
+          <span>New Session</span>
+        </button>
+
+        <!-- Session List -->
+        <div class="sessions-container">
+          <div class="sessions-header">
+            <span>Sessions</span>
+            <select id="workspaceFilter" class="workspace-filter">
+              <option value="">All Workspaces</option>
             </select>
           </div>
-
-          <div class="form-group">
-            <label for="session">Session</label>
-            <select id="session" class="input">
-              <option value="">✨ New Session</option>
-            </select>
-            <div id="sessionInfo" class="session-info" hidden></div>
+          <div class="sessions-list" id="sessionsList">
+            <p class="empty-state">Loading sessions...</p>
           </div>
+        </div>
+      </aside>
 
-          <div class="form-group full-width">
-            <label for="prompt">Prompt</label>
-            <textarea id="prompt" class="input textarea" rows="4" placeholder="What do you want to do?"></textarea>
-          </div>
-
-          <div class="form-section collapsed">
-            <div class="form-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
-              Advanced Options (Validation & Images)
+      <!-- Main Content -->
+      <main class="main-content" id="mainContent">
+        <!-- Welcome/New Session View -->
+        <section id="view-welcome" class="view active">
+          <div class="welcome-content">
+            <h2>👋 Welcome to Remote Agent</h2>
+            <p>Select a session from the sidebar or create a new one to get started.</p>
+            
+            <div class="quick-start">
+              <h3>Quick Start</h3>
+              <button class="btn btn-primary" id="quickStartBtn">
+                <span class="icon">🚀</span> Create New Session
+              </button>
             </div>
-            <div class="form-section-content">
+          </div>
+        </section>
+
+        <!-- New Session Form View -->
+        <section id="view-new-session" class="view">
+          <div class="view-header">
+            <h2>New Session</h2>
+          </div>
+          
+          <form id="newSessionForm" class="session-form">
+            <div class="form-group">
+              <label for="workspace">Workspace</label>
+              <div class="input-with-action">
+                <select id="workspace" class="input" required>
+                  <option value="">Select a workspace...</option>
+                </select>
+                <button type="button" class="btn btn-icon" id="addWorkspaceBtn" title="Add Workspace">➕</button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="prompt">Prompt</label>
+              <textarea id="prompt" class="input textarea" rows="4" placeholder="What do you want to accomplish?" required></textarea>
+            </div>
+
+            <div class="form-row">
               <div class="form-group">
-                <label for="validation">Validation Instructions</label>
-                <textarea id="validation" class="input textarea" rows="2" placeholder="How to verify the changes (runs in isolated session)"></textarea>
+                <label for="model">Model</label>
+                <select id="model" class="input">
+                  <option value="">Default</option>
+                </select>
+              </div>
+            </div>
+
+            <details class="advanced-options">
+              <summary>Advanced Options</summary>
+              <div class="form-group">
+                <label for="validationPrompt">Validation Prompt</label>
+                <textarea id="validationPrompt" class="input textarea" rows="2" placeholder="How to validate the changes..."></textarea>
               </div>
 
               <div class="form-group">
-                <label for="imageInstructions">Output Images</label>
-                <textarea id="imageInstructions" class="input textarea" rows="2" placeholder="What images to generate (runs in isolated session)"></textarea>
+                <label for="outputPrompt">Output/Image Prompt</label>
+                <textarea id="outputPrompt" class="input textarea" rows="2" placeholder="What outputs to generate..."></textarea>
+              </div>
+            </details>
+
+            <div class="form-actions">
+              <button type="button" class="btn btn-secondary" id="cancelNewSession">Cancel</button>
+              <button type="submit" class="btn btn-primary" id="startSessionBtn">
+                <span class="btn-text">Start Session</span>
+                <span class="btn-loading" hidden>Starting...</span>
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Session Detail View -->
+        <section id="view-session" class="view">
+          <div class="session-detail">
+            <!-- Session Header -->
+            <div class="session-header" id="sessionHeader">
+              <div class="session-title">
+                <h2 id="sessionName">Session Name</h2>
+                <span class="session-workspace" id="sessionWorkspace">Workspace</span>
+              </div>
+              <div class="session-meta">
+                <span id="sessionBranch">🌿 branch</span>
+                <span id="sessionRunCount">0 runs</span>
+                <span id="sessionCreated">Created: --</span>
               </div>
             </div>
+
+            <!-- Tabs -->
+            <div class="session-tabs">
+              <button class="tab-btn active" data-tab="runs">Runs</button>
+              <button class="tab-btn" data-tab="changes">Commits</button>
+              <button class="tab-btn" data-tab="new-run">+ New Run</button>
+            </div>
+
+            <!-- Runs Tab -->
+            <div class="tab-content" id="tab-runs">
+              <div class="runs-timeline" id="runsTimeline">
+                <p class="empty-state">No runs yet</p>
+              </div>
+            </div>
+
+            <!-- File Changes Tab -->
+            <div class="tab-content hidden" id="tab-changes">
+              <div class="git-changes" id="gitChanges">
+                <p class="empty-state">Loading changes...</p>
+              </div>
+            </div>
+
+            <!-- New Run Tab -->
+            <div class="tab-content hidden" id="tab-new-run">
+              <form id="newRunForm" class="run-form">
+                <div class="form-group">
+                  <label for="runPrompt">Prompt</label>
+                  <textarea id="runPrompt" class="input textarea" rows="3" placeholder="What do you want to do next?" required></textarea>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="runModel">Model</label>
+                    <select id="runModel" class="input">
+                      <option value="">Use session default</option>
+                    </select>
+                  </div>
+                </div>
+
+                <details class="advanced-options">
+                  <summary>Override Prompts</summary>
+                  <div class="form-group">
+                    <label for="runValidation">Validation Prompt</label>
+                    <textarea id="runValidation" class="input textarea" rows="2" placeholder="Override validation..."></textarea>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="runOutput">Output Prompt</label>
+                    <textarea id="runOutput" class="input textarea" rows="2" placeholder="Override output generation..."></textarea>
+                  </div>
+                </details>
+
+                <button type="submit" class="btn btn-primary" id="startRunBtn">
+                  <span class="btn-text">Start Run</span>
+                  <span class="btn-loading" hidden>Running...</span>
+                </button>
+              </form>
+            </div>
           </div>
+        </section>
 
-          <button id="submitBtn" class="btn btn-primary">
-            <span class="btn-text">Start Run</span>
-            <span class="btn-loading" hidden>Running...</span>
-          </button>
-        </div>
-      </section>
-
-      <!-- History View -->
-      <section id="view-history" class="view">
-        <div id="runsList" class="runs-list">
-          <p class="empty-state">Loading runs...</p>
-        </div>
-      </section>
-
-      <!-- Current/Detail View -->
-      <section id="view-current" class="view">
-        <div id="runDetail" class="run-detail">
-          <p class="empty-state">No run selected</p>
-        </div>
-      </section>
-    </main>
+        <!-- Run Detail View (when clicking on a specific run) -->
+        <section id="view-run" class="view">
+          <div class="run-detail" id="runDetail">
+            <button class="back-btn" id="backToSession">← Back to Session</button>
+            <div class="run-content" id="runContent">
+              <p class="empty-state">Loading run...</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
 
     <!-- Notification Permission Banner -->
     <div id="notificationBanner" class="notification-banner" hidden>
@@ -98,6 +219,67 @@
       <button id="enableNotifications" class="btn btn-small">Enable</button>
       <button id="dismissNotifications" class="btn btn-small btn-secondary">Later</button>
     </div>
+
+    <!-- Workspace Modal -->
+    <div id="workspaceModal" class="modal" hidden>
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Add Workspace</h3>
+          <button class="modal-close" id="closeWorkspaceModal">&times;</button>
+        </div>
+        <form id="addWorkspaceForm" class="modal-form">
+          <div class="form-group">
+            <label for="workspaceName">Name</label>
+            <input type="text" id="workspaceName" class="input" placeholder="My Project" required>
+          </div>
+          <div class="form-group">
+            <label for="workspacePath">Path</label>
+            <input type="text" id="workspacePath" class="input" placeholder="/home/user/projects/my-project" required>
+          </div>
+          
+          <div class="form-section-header">Default Models</div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label for="wsDefaultModel">Prompt Model</label>
+              <select id="wsDefaultModel" class="input">
+                <option value="">Use Global Default</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="wsValidationModel">Validation Model</label>
+              <select id="wsValidationModel" class="input">
+                <option value="">Use Global Default</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="wsOutputModel">Output Model</label>
+              <select id="wsOutputModel" class="input">
+                <option value="">Use Global Default</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-section-header">Default Prompts</div>
+          <div class="form-group">
+            <label for="workspaceValidation">Validation Prompt</label>
+            <textarea id="workspaceValidation" class="input textarea" rows="2" placeholder="Verify changes work correctly"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="workspaceOutput">Output/Image Prompt</label>
+            <textarea id="workspaceOutput" class="input textarea" rows="2" placeholder="Generate screenshots of the result"></textarea>
+          </div>
+          
+          <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" id="cancelAddWorkspace">Cancel</button>
+            <button type="submit" class="btn btn-primary">Add Workspace</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Overlay for mobile sidebar -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
   </div>
 
   <script src="/js/app.js" type="module"></script>

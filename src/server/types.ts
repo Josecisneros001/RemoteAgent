@@ -5,19 +5,52 @@ export interface WorkspaceConfig {
   path: string;
   validationPrompt?: string;
   outputPrompt?: string;
+  defaultModel?: string;         // Default model for prompt phase
+  validationModel?: string;      // Default model for validation phase
+  outputModel?: string;          // Default model for output phase
+  gitRepo?: string;              // Git URL for cloning new workspaces
+}
+
+export interface McpConfig {
+  id: string;
+  name: string;
+  enabled: boolean;
 }
 
 export interface Config {
   workspaces: WorkspaceConfig[];
-  mcps: string[];
-  model: string;
+  mcps: McpConfig[];
+  availableModels: string[];
+  defaultModel: string;           // Global default for prompt phase
+  defaultValidationModel: string; // Global default for validation phase
+  defaultOutputModel: string;     // Global default for output phase
   port: number;
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidEmail?: string;
 }
 
-// Run types
+// Session types - main concept now
+export interface Session {
+  id: string;                    // Our internal session ID (UUID)
+  copilotSessionId?: string;     // Copilot CLI session ID for main prompt
+  validationSessionId?: string;  // Hidden session for validation
+  outputSessionId?: string;      // Hidden session for output generation
+  workspaceId: string;
+  workspacePath: string;
+  friendlyName: string;          // First ~50 chars of initial prompt
+  branchName: string;            // Git branch for this session
+  createdAt: string;
+  updatedAt: string;
+  defaultValidationPrompt?: string;
+  defaultOutputPrompt?: string;
+  defaultModel?: string;
+  validationModel?: string;       // Model for validation phase
+  outputModel?: string;           // Model for output phase
+  enabledMcps?: string[];
+}
+
+// Run (iteration) types - a run is one iteration within a session
 export type RunPhase = 'pending' | 'prompt' | 'validation' | 'output' | 'completed' | 'failed';
 
 export interface LogEntry {
@@ -39,68 +72,120 @@ export interface ImageResult {
   timestamp: string;
 }
 
+export interface CommitInfo {
+  hash: string;
+  shortHash: string;
+  message: string;
+  branch: string;
+  timestamp: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
 export interface Run {
   id: string;
-  workspaceId: string;
-  workspacePath: string;
+  sessionId: string;            // Links to parent session
   prompt: string;
-  validationInstructions: string;
-  imageInstructions: string;
+  validationPrompt?: string;    // Override for this run
+  outputPrompt?: string;        // Override for this run
+  model?: string;               // Override model for prompt phase
+  validationModel?: string;     // Override model for validation phase
+  outputModel?: string;         // Override model for output phase
+  enabledMcps?: string[];       // Override MCPs for this run
   status: RunPhase;
   logs: LogEntry[];
   validation: ValidationResult;
   images: ImageResult[];
+  commitInfo?: CommitInfo;      // Git commit info for this run
   createdAt: string;
   updatedAt: string;
   error?: string;
-  // Session management
-  sessionId?: string;        // Copilot session ID for the main prompt
-  continueSession?: string;  // Session ID to continue from (if any)
+}
+
+export interface SessionSummary {
+  id: string;
+  friendlyName: string;
+  branchName: string;
+  workspaceId: string;
+  workspaceName: string;
+  workspacePath: string;
+  runCount: number;
+  lastRunStatus?: RunPhase;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RunSummary {
   id: string;
-  workspaceId: string;
-  workspaceName: string;
+  sessionId: string;
   prompt: string;
   status: RunPhase;
   createdAt: string;
+}
+
+// Git changes
+export interface GitFileChange {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
+  insertions?: number;
+  deletions?: number;
+}
+
+export interface GitChanges {
+  branch: string;
+  ahead: number;
+  behind: number;
+  staged: GitFileChange[];
+  unstaged: GitFileChange[];
+  untracked: GitFileChange[];
+}
+
+export interface FileDiff {
+  path: string;
+  diff: string;
 }
 
 // WebSocket event types
 export interface WsLogEvent {
   type: 'log';
   runId: string;
+  sessionId: string;
   entry: LogEntry;
 }
 
 export interface WsPhaseEvent {
   type: 'phase';
   runId: string;
+  sessionId: string;
   phase: RunPhase;
 }
 
 export interface WsValidationEvent {
   type: 'validation';
   runId: string;
+  sessionId: string;
   validation: ValidationResult;
 }
 
 export interface WsImageEvent {
   type: 'image';
   runId: string;
+  sessionId: string;
   image: ImageResult;
 }
 
 export interface WsErrorEvent {
   type: 'error';
   runId: string;
+  sessionId: string;
   error: string;
 }
 
 export interface WsCompleteEvent {
   type: 'complete';
   runId: string;
+  sessionId: string;
   status: 'completed' | 'failed';
 }
 
@@ -116,20 +201,26 @@ export interface PushSubscription {
 }
 
 // API request types
-export interface StartRunRequest {
+export interface CreateSessionRequest {
   workspaceId: string;
   prompt: string;
-  validationInstructions: string;
-  imageInstructions: string;
-  continueSession?: string;  // Optional session ID to continue
+  validationPrompt?: string;
+  outputPrompt?: string;
+  model?: string;
+  enabledMcps?: string[];
 }
 
-// Session info
-export interface SessionInfo {
-  id: string;
-  workspaceId: string;
-  workspaceName: string;
-  lastPrompt: string;
-  createdAt: string;
-  updatedAt: string;
+export interface StartRunRequest {
+  sessionId: string;
+  prompt: string;
+  validationPrompt?: string;
+  outputPrompt?: string;
+  model?: string;
+  enabledMcps?: string[];
+}
+
+export interface CloneWorkspaceRequest {
+  gitUrl: string;
+  name: string;
+  targetPath?: string;
 }

@@ -43,3 +43,6 @@ pids/
 
 # TypeScript cache
 *.tsbuildinfo
+
+# Playwright test artifacts
+.playwright-mcp/*

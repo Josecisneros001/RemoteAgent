@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { Config } from '../types.js';
+import type { Config, WorkspaceConfig } from '../types.js';
 
 const CONFIG_DIR = join(homedir(), '.remote-agent');
 const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
@@ -10,7 +10,24 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 const DEFAULT_CONFIG: Config = {
   workspaces: [],
   mcps: [],
-  model: 'claude-sonnet-4',
+  availableModels: [
+    'claude-opus-4.5',
+    'claude-sonnet-4.5',
+    'claude-haiku-4.5',
+    'claude-sonnet-4',
+    'gpt-5.1-codex-max',
+    'gpt-5.1-codex',
+    'gpt-5.2',
+    'gpt-5.1',
+    'gpt-5',
+    'gpt-5.1-codex-mini',
+    'gpt-5-mini',
+    'gpt-4.1',
+    'gemini-3-pro-preview',
+  ],
+  defaultModel: 'claude-opus-4.5',
+  defaultValidationModel: 'claude-sonnet-4.5',
+  defaultOutputModel: 'claude-sonnet-4.5',
   port: 3000,
 };
 
@@ -19,6 +36,11 @@ let cachedConfig: Config | null = null;
 export async function ensureConfigDir(): Promise<void> {
   if (!existsSync(CONFIG_DIR)) {
     await mkdir(CONFIG_DIR, { recursive: true });
+  }
+  
+  const sessionsDir = join(CONFIG_DIR, 'sessions');
+  if (!existsSync(sessionsDir)) {
+    await mkdir(sessionsDir, { recursive: true });
   }
   
   const runsDir = join(CONFIG_DIR, 'runs');
@@ -40,8 +62,28 @@ export async function loadConfig(): Promise<Config> {
   
   try {
     const content = await readFile(CONFIG_PATH, 'utf-8');
-    cachedConfig = { ...DEFAULT_CONFIG, ...JSON.parse(content) };
-    return cachedConfig;
+    const loaded = JSON.parse(content);
+    
+    // Migrate old config format if needed
+    if ('model' in loaded && !('defaultModel' in loaded)) {
+      loaded.defaultModel = loaded.model;
+      delete loaded.model;
+    }
+    if (!loaded.availableModels) {
+      loaded.availableModels = DEFAULT_CONFIG.availableModels;
+    }
+    if (Array.isArray(loaded.mcps) && loaded.mcps.length > 0 && typeof loaded.mcps[0] === 'string') {
+      // Convert old string array to McpConfig array
+      loaded.mcps = loaded.mcps.map((name: string) => ({
+        id: name.toLowerCase().replace(/\s+/g, '-'),
+        name,
+        enabled: true,
+      }));
+    }
+    
+    const mergedConfig = { ...DEFAULT_CONFIG, ...loaded };
+    cachedConfig = mergedConfig;
+    return mergedConfig;
   } catch (error) {
     console.error('Error loading config, using defaults:', error);
     cachedConfig = DEFAULT_CONFIG;
@@ -64,9 +106,23 @@ export async function updateConfig(updates: Partial<Config>): Promise<Config> {
   return updated;
 }
 
-export function getWorkspace(id: string) {
+export function getWorkspace(id: string): WorkspaceConfig | undefined {
   const config = getConfig();
   return config.workspaces.find(w => w.id === id);
+}
+
+export async function addWorkspace(workspace: WorkspaceConfig): Promise<void> {
+  const config = getConfig();
+  
+  // Check if workspace with same ID exists
+  const existing = config.workspaces.findIndex(w => w.id === workspace.id);
+  if (existing >= 0) {
+    config.workspaces[existing] = workspace;
+  } else {
+    config.workspaces.push(workspace);
+  }
+  
+  await updateConfig({ workspaces: config.workspaces });
 }
 
 export function getConfigDir(): string {

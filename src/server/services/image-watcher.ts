@@ -1,4 +1,4 @@
-import chokidar from 'chokidar';
+import chokidar, { type FSWatcher } from 'chokidar';
 import { join, basename } from 'path';
 import { existsSync } from 'fs';
 import { mkdir, readdir, stat } from 'fs/promises';
@@ -8,20 +8,23 @@ import type { ImageResult, WsImageEvent } from '../types.js';
 type ImageCallback = (event: WsImageEvent) => void;
 
 interface WatcherState {
-  watcher: chokidar.FSWatcher | null;
+  watcher: FSWatcher | null;
   runId: string | null;
+  sessionId: string | null;
   callback: ImageCallback | null;
 }
 
 const state: WatcherState = {
   watcher: null,
   runId: null,
+  sessionId: null,
   callback: null,
 };
 
 export async function startWatching(
   workspacePath: string,
   runId: string,
+  sessionId: string,
   onImage: ImageCallback
 ): Promise<void> {
   // Stop any existing watcher
@@ -35,6 +38,7 @@ export async function startWatching(
   }
 
   state.runId = runId;
+  state.sessionId = sessionId;
   state.callback = onImage;
 
   state.watcher = chokidar.watch(outputsDir, {
@@ -70,16 +74,17 @@ export async function startWatching(
     }
 
     // Notify via callback
-    if (state.callback && state.runId) {
+    if (state.callback && state.runId && state.sessionId) {
       state.callback({
         type: 'image',
         runId: state.runId,
+        sessionId: state.sessionId,
         image,
       });
     }
   });
 
-  state.watcher.on('error', (error) => {
+  state.watcher.on('error', (error: unknown) => {
     console.error('File watcher error:', error);
   });
 
@@ -91,6 +96,7 @@ export async function stopWatching(): Promise<void> {
     await state.watcher.close();
     state.watcher = null;
     state.runId = null;
+    state.sessionId = null;
     state.callback = null;
   }
 }
