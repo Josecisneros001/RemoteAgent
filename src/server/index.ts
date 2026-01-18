@@ -3,6 +3,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { existsSync } from 'fs';
 import { loadConfig, getConfig } from './services/config.js';
 import { initPush } from './services/push.js';
 import { addClient, broadcast } from './services/websocket.js';
@@ -27,9 +28,20 @@ async function main() {
   // Register WebSocket plugin
   await app.register(fastifyWebsocket);
 
+  // Determine which client to serve
+  const reactClientPath = join(__dirname, '../client');
+  const clientPath = existsSync(reactClientPath) ? reactClientPath : new Error('Client build not found. Please build the client before starting the server.');
+  
+  if (clientPath instanceof Error) {
+    console.error(clientPath.message);
+    process.exit(1);
+  }
+
+  console.log(`📦 Serving client from: ${clientPath}`);
+
   // Register static file serving for client
   await app.register(fastifyStatic, {
-    root: join(__dirname, '../client'),
+    root: clientPath,
     prefix: '/',
   });
 

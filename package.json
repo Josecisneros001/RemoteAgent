@@ -5,8 +5,12 @@
   "main": "dist/server/index.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run build:client",
+    "build:client": "cd src/client && npm run build",
+    "clean": "rm -rf dist",
     "dev": "tsx watch src/server/index.ts",
+    "dev:client": "cd src/client && npm run dev",
+    "watch": "concurrently -n server,client -c blue,magenta \"npm run dev\" \"npm run dev:client\"",
     "start": "node dist/server/index.js",
     "tunnel": "./scripts/tunnel.sh"
   },
@@ -24,6 +28,7 @@
     "@types/ws": "^8.5.0",
     "@types/web-push": "^3.6.0",
     "@types/uuid": "^10.0.0",
+    "concurrently": "^9.1.0",
     "typescript": "^5.6.0",
     "tsx": "^4.19.0"
   }

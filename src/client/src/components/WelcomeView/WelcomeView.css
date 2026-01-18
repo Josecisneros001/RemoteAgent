@@ -1,0 +1,33 @@
+.view-welcome {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+
+.welcome-content {
+  max-width: 500px;
+  margin: 40px auto;
+  text-align: center;
+  padding: 24px;
+}
+
+.welcome-content h2 {
+  font-size: 1.5rem;
+  margin-bottom: 12px;
+}
+
+.welcome-content p {
+  color: var(--text-secondary);
+  margin-bottom: 32px;
+}
+
+.quick-start {
+  margin-top: 24px;
+}
+
+.quick-start h3 {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}

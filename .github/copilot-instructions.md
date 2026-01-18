@@ -10,7 +10,7 @@ RemoteAgent is a mobile-friendly web control panel for GitHub Copilot CLI. It pr
 - **Server**: Fastify with WebSocket support (`@fastify/websocket`)
 - **File Watching**: chokidar for monitoring output images
 - **Push Notifications**: web-push with VAPID keys
-- **Frontend**: Vanilla JavaScript (no framework), mobile-first PWA
+- **Frontend**: React 19 with TypeScript, Vite, mobile-first PWA
 - **Remote Access**: Microsoft Dev Tunnels (`devtunnel`)
 - **Git Integration**: Automatic branch management per session
 
@@ -31,14 +31,37 @@ src/
 │       ├── image-watcher.ts  # Watch outputs/ for new images
 │       ├── push.ts           # Push notification service
 │       └── websocket.ts      # WebSocket client management
-├── client/
-│   ├── index.html            # Main HTML page
-│   ├── manifest.json         # PWA manifest
-│   ├── sw.js                 # Service worker for PWA
-│   ├── js/
-│   │   └── app.js            # Frontend application logic
-│   └── styles/
-│       └── main.css          # Mobile-first styles
+├── client/                   # React frontend (Vite)
+│   ├── index.html            # HTML entry point
+│   ├── vite.config.ts        # Vite configuration with proxy
+│   ├── public/
+│   │   ├── manifest.json     # PWA manifest
+│   │   └── sw.js             # Service worker for PWA
+│   └── src/
+│       ├── main.tsx          # React entry point
+│       ├── App.tsx           # Root component
+│       ├── App.css           # Global styles & CSS variables
+│       ├── types.ts          # TypeScript type definitions
+│       ├── api/
+│       │   └── index.ts      # API client functions
+│       ├── context/
+│       │   └── AppContext.tsx # Global state management
+│       ├── components/
+│       │   ├── MobileHeader/  # Mobile navigation header
+│       │   ├── Sidebar/       # Session list sidebar
+│       │   ├── SessionList/   # Session list component
+│       │   ├── SessionView/   # Session detail with runs
+│       │   ├── RunsList/      # Runs list in session
+│       │   ├── RunDetail/     # Run detail with logs/images
+│       │   ├── NewSessionForm/ # Create new session
+│       │   ├── NewRunForm/    # Create new run
+│       │   ├── CommitsTab/    # Git commits view
+│       │   └── WelcomeView/   # Welcome screen
+│       └── utils/
+│           └── helpers.ts    # Utility functions
+dist/                         # Build output (git-ignored)
+├── server/                   # Compiled server TypeScript
+└── client/                   # Built React frontend (served by Fastify)
 ```
 
 ## Core Concepts
@@ -79,7 +102,7 @@ Models are resolved in this order: Run → Session → Workspace → Global Defa
 ### WebSocket Streaming
 - Real-time log streaming from Copilot CLI to browser
 - Events: `log`, `phase`, `validation`, `image`, `complete`
-- Debounced UI updates to prevent excessive re-renders
+- Debounced UI updates in AppContext to prevent excessive re-renders
 
 ### Image Handling
 - Images saved to `<workspace>/outputs/` directory
@@ -170,21 +193,34 @@ interface WorkspaceConfig {
 3. Import and use in routes or other services
 
 ### Modifying the UI
-1. Update HTML in `src/client/index.html`
-2. Add styles in `src/client/styles/main.css`
-3. Add logic in `src/client/js/app.js`
-4. Test on mobile viewport sizes
-5. **Note**: Restart server to pick up HTML/CSS changes (tsx watch only monitors .ts files)
+1. Components are in `src/client/src/components/` with co-located CSS
+2. Global styles and CSS variables in `src/client/src/App.css`
+3. State management via React Context in `src/client/src/context/AppContext.tsx`
+4. API calls in `src/client/src/api/index.ts`
+5. Run `cd src/client && npm run dev` for hot-reload development
+6. Build with `npm run build` (outputs to `dist/server/` and `dist/client/`)
+7. Test on mobile viewport sizes
+
+### Adding a new component
+1. Create folder in `src/client/src/components/ComponentName/`
+2. Add `ComponentName.tsx` and `ComponentName.css`
+3. Export from component file
+4. Import and use in parent component
+5. Add types in `src/client/src/types.ts` if needed
 
 ### Adding a new workspace creation option
-1. Update HTML form in workspace modal
-2. Add JS handler in `handleAddWorkspace()`
-3. Update API endpoint in `api.ts`
+1. Update NewSessionForm component
+2. Add handler function with API call
+3. Update API endpoint in `src/server/routes/api.ts`
 4. Add git operations in `git.ts` if needed
 
 ## Testing
 
-- Run `npm run dev` for development (uses tsx watch)
+- Run `npm run watch` to start both server and client in development mode
+- Run `npm run dev` for server-only development (uses tsx watch)
+- Run `cd src/client && npm run dev` for frontend-only development with hot-reload
+- Run `npm run build` to build both server and client to `dist/`
+- Run `npm run clean` to remove the `dist/` folder
 - Use `devtunnel` to test remote access from phone
 - Check browser console for frontend errors
 - Check terminal for server-side errors

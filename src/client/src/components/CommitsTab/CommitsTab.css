@@ -1,0 +1,212 @@
+.commits-tab {
+  padding: 8px 0;
+}
+
+.git-branch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 0.875rem;
+}
+
+.git-branch-name {
+  font-family: monospace;
+  background: var(--bg-tertiary);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+
+.commits-count {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.commits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.commit-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.commit-header-row {
+  padding: 12px 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.commit-header-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.commit-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.commit-hash {
+  font-family: monospace;
+  background: var(--bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.commit-date {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+}
+
+.commit-message {
+  font-size: 0.8125rem;
+  margin-bottom: 6px;
+}
+
+.commit-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+}
+
+.files-changed {
+  color: var(--text-secondary);
+}
+
+/* Commit Files */
+.commit-files {
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  background: var(--bg-primary);
+}
+
+.commit-files-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.commit-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.commit-file-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.commit-file-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.commit-file-path {
+  flex: 1;
+  font-family: monospace;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commit-file-stats {
+  display: flex;
+  gap: 8px;
+  font-size: 0.6875rem;
+}
+
+.commit-file-status {
+  font-size: 0.625rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.commit-file-status.added { background: var(--success); color: #000; }
+.commit-file-status.modified { background: var(--warning); color: #000; }
+.commit-file-status.deleted { background: var(--error); color: #fff; }
+
+/* File Diff */
+.file-diff-container {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.file-diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: var(--bg-tertiary);
+  font-size: 0.75rem;
+  font-family: monospace;
+}
+
+.file-diff-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.file-diff-content {
+  max-height: 400px;
+  overflow: auto;
+  background: var(--bg-primary);
+}
+
+.diff-lines {
+  font-family: monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.diff-line {
+  padding: 0 12px;
+  white-space: pre;
+}
+
+.diff-line.addition {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--success);
+}
+
+.diff-line.deletion {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error);
+}
+
+.diff-line.hunk-header {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  margin-top: 8px;
+}
+
+.diff-line.context {
+  color: var(--text-secondary);
+}
