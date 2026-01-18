@@ -1,4 +1,6 @@
 // API Types
+export type AgentType = 'copilot' | 'claude';
+
 export interface Config {
   workspaces: WorkspaceConfig[];
   mcps: McpConfig[];
@@ -31,6 +33,7 @@ export interface McpConfig {
 
 export interface Session {
   id: string;
+  agent: AgentType;
   friendlyName: string;
   workspaceId: string;
   branchName?: string;

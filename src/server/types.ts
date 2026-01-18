@@ -30,10 +30,14 @@ export interface Config {
   vapidEmail?: string;
 }
 
+// Agent types - which CLI to use
+export type AgentType = 'copilot' | 'claude';
+
 // Session types - main concept now
 export interface Session {
   id: string;                    // Our internal session ID (UUID)
-  copilotSessionId?: string;     // Copilot CLI session ID for main prompt
+  agent: AgentType;              // Which CLI agent owns this session
+  copilotSessionId?: string;     // CLI session ID for main prompt (works for both agents)
   validationSessionId?: string;  // Hidden session for validation
   outputSessionId?: string;      // Hidden session for output generation
   workspaceId: string;
@@ -105,6 +109,7 @@ export interface Run {
 
 export interface SessionSummary {
   id: string;
+  agent: AgentType;
   friendlyName: string;
   branchName: string;
   workspaceId: string;
@@ -204,6 +209,7 @@ export interface PushSubscription {
 export interface CreateSessionRequest {
   workspaceId: string;
   prompt: string;
+  agent?: AgentType;
   validationPrompt?: string;
   outputPrompt?: string;
   model?: string;

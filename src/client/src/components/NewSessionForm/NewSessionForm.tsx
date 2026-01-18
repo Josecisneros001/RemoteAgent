@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { useApp } from '../../context/AppContext';
+import type { AgentType } from '../../types';
 import * as api from '../../api';
 import './NewSessionForm.css';
 
@@ -9,6 +10,7 @@ export function NewSessionForm() {
   
   const [workspaceId, setWorkspaceId] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [agent, setAgent] = useState<AgentType>('copilot');
   const [model, setModel] = useState('');
   const [validationModel, setValidationModel] = useState('');
   const [outputModel, setOutputModel] = useState('');
@@ -40,6 +42,7 @@ export function NewSessionForm() {
       const result = await api.createSession({
         workspaceId,
         prompt: prompt.trim(),
+        agent,
         validationPrompt: validationPrompt.trim() || undefined,
         outputPrompt: outputPrompt.trim() || undefined,
         model: model || undefined,
@@ -83,6 +86,34 @@ export function NewSessionForm() {
                 <option key={ws.id} value={ws.id}>{ws.name}</option>
               ))}
             </select>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label>Agent</label>
+          <div className="agent-selector">
+            <label className={`agent-option ${agent === 'copilot' ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="agent"
+                value="copilot"
+                checked={agent === 'copilot'}
+                onChange={(e) => setAgent(e.target.value as AgentType)}
+              />
+              <span className="agent-icon">🤖</span>
+              <span className="agent-name">Copilot</span>
+            </label>
+            <label className={`agent-option ${agent === 'claude' ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="agent"
+                value="claude"
+                checked={agent === 'claude'}
+                onChange={(e) => setAgent(e.target.value as AgentType)}
+              />
+              <span className="agent-icon">🧠</span>
+              <span className="agent-name">Claude</span>
+            </label>
           </div>
         </div>
 

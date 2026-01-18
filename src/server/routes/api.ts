@@ -64,7 +64,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // Create new session and start first run
   app.post<{ Body: CreateSessionRequest }>('/api/sessions', async (request, reply) => {
-    const { workspaceId, prompt, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
+    const { workspaceId, prompt, agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
 
     // Validate workspace
     const workspace = getWorkspace(workspaceId);
@@ -86,7 +86,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const { session, run } = await startNewSession(
       workspaceId,
       prompt,
-      { validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
+      { agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
       broadcast
     );
 

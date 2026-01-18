@@ -6,6 +6,11 @@ import { RunDetail } from '../RunDetail/RunDetail';
 import type { RunTabType } from '../../types';
 import './SessionView.css';
 
+const agentLabels: Record<string, { icon: string; name: string }> = {
+  copilot: { icon: '🤖', name: 'Copilot' },
+  claude: { icon: '🧠', name: 'Claude' },
+};
+
 export function SessionView() {
   const { currentSession, currentRuns, currentRunId, config, setCurrentRunId, loadRunDetail } = useApp();
   const [runView, setRunView] = useState<'new-run' | 'run-detail' | 'empty'>('empty');
@@ -31,6 +36,7 @@ export function SessionView() {
   if (!currentSession) return null;
 
   const workspace = config?.workspaces?.find(w => w.id === currentSession.workspaceId);
+  const agent = agentLabels[currentSession.agent] || agentLabels.copilot;
 
   const handleNewRun = () => {
     setCurrentRunId(null);
@@ -55,6 +61,7 @@ export function SessionView() {
               <span className="session-workspace">{workspace?.name || currentSession.workspaceId}</span>
             </div>
             <div className="session-meta-compact">
+              <span className="session-agent" title={agent.name}>{agent.icon} {agent.name}</span>
               <span>🌿 {currentSession.branchName || 'no branch'}</span>
               <span>{currentRuns.length} run{currentRuns.length !== 1 ? 's' : ''}</span>
             </div>

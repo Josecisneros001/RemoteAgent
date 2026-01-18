@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'child_process';
+import { randomUUID } from 'crypto';
 import { getConfig } from './config.js';
 import { 
   createSession, getSession, updateSessionCopilotId, updateSessionValidationId, updateSessionOutputId,
@@ -10,7 +11,7 @@ import {
   isGitRepo, generateBranchName, checkoutMainAndPull, createAndCheckoutBranch, 
   checkoutBranch, branchExists, commitAndPush 
 } from './git.js';
-import type { Session, Run, RunPhase, LogEntry, WsEvent, ValidationResult, WorkspaceConfig } from '../types.js';
+import type { Session, Run, RunPhase, LogEntry, WsEvent, ValidationResult, WorkspaceConfig, AgentType } from '../types.js';
 
 type EventCallback = (event: WsEvent) => void;
 
@@ -31,8 +32,28 @@ function createLogEntry(phase: RunPhase, type: 'stdout' | 'stderr' | 'system', c
   };
 }
 
-// Extract session ID from copilot output
-function extractSessionId(output: string): string | null {
+// Extract session ID from CLI output
+// For Copilot: regex patterns in text output
+// For Claude: JSON with session_id field
+function extractSessionId(output: string, agent: AgentType = 'copilot'): string | null {
+  if (agent === 'claude') {
+    // Claude outputs JSON lines with session_id
+    // Look for the init message which has session_id
+    const lines = output.split('\n');
+    for (const line of lines) {
+      try {
+        const json = JSON.parse(line.trim());
+        if (json.session_id) {
+          return json.session_id;
+        }
+      } catch {
+        // Not valid JSON, skip
+      }
+    }
+    return null;
+  }
+  
+  // Copilot: use regex patterns
   const patterns = [
     /session[:\s]+([a-zA-Z0-9_-]+)/i,
     /resuming\s+session\s+([a-zA-Z0-9_-]+)/i,
@@ -89,44 +110,86 @@ async function runCopilotPhase(
   await updateRunPhase(run.id, phase);
   onEvent({ type: 'phase', runId: run.id, sessionId: session.id, phase });
 
+  const agentName = session.agent === 'claude' ? 'Claude' : 'Copilot';
   const phaseLabel = options.resumeSession ? `${phase} (resuming session)` : phase;
-  const systemLog = createLogEntry(phase, 'system', `Starting ${phaseLabel} phase with model: ${model}...`);
+  const systemLog = createLogEntry(phase, 'system', `Starting ${phaseLabel} phase with ${agentName}, model: ${model}...`);
   await appendLog(run.id, systemLog);
   onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: systemLog });
 
   return new Promise((resolve) => {
-    const args = [
-      '-p', prompt,
-      '--model', model,
-      '--allow-all-tools',
-      '--allow-all-paths',
-      '--no-color',
-    ];
+    let args: string[];
+    let command: string;
+    let envVars: Record<string, string> = { ...process.env } as Record<string, string>;
+    let capturedSessionId: string | null = null;  // Track CLI session ID
 
-    // Resume session if provided
-    if (options.resumeSession) {
-      args.push('--resume', options.resumeSession);
-      const resumeLog = createLogEntry(phase, 'system', `Resuming Copilot session: ${options.resumeSession}`);
-      appendLog(run.id, resumeLog);
-      onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: resumeLog });
+    if (session.agent === 'claude') {
+      // Claude CLI arguments
+      // Note: -p/--print means "print response and exit", prompt is positional at the end
+      command = 'claude';
+      
+      // Generate or reuse session ID for Claude
+      const claudeSessionId = options.resumeSession || randomUUID();
+      
+      args = [
+        '-p',  // print mode (non-interactive)
+        '--model', model,
+        '--dangerously-skip-permissions',
+        '--verbose',
+        '--session-id', claudeSessionId,  // Use explicit session ID for persistence
+      ];
+      
+      // Resume session if we have one
+      if (options.resumeSession) {
+        args.push('--resume', options.resumeSession);
+        const resumeLog = createLogEntry(phase, 'system', `Resuming Claude session: ${options.resumeSession}`);
+        appendLog(run.id, resumeLog);
+        onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: resumeLog });
+      }
+      
+      // Prompt must be last (positional argument)
+      args.push(prompt);
+      
+      // Store the session ID so we can return it
+      capturedSessionId = claudeSessionId;
+    } else {
+      // Copilot CLI arguments (default)
+      command = 'copilot';
+      args = [
+        '-p', prompt,
+        '--model', model,
+        '--allow-all-tools',
+        '--allow-all-paths',
+        '--no-color',
+      ];
+      envVars['COPILOT_ALLOW_ALL'] = 'true';
+      
+      // Resume session if provided
+      if (options.resumeSession) {
+        args.push('--resume', options.resumeSession);
+        const resumeLog = createLogEntry(phase, 'system', `Resuming Copilot session: ${options.resumeSession}`);
+        appendLog(run.id, resumeLog);
+        onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: resumeLog });
+      }
     }
 
-    currentProcess = spawn('copilot', args, {
+    currentProcess = spawn(command, args, {
       cwd: session.workspacePath,
-      env: {
-        ...process.env,
-        COPILOT_ALLOW_ALL: 'true',
-      },
+      env: envVars,
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+    
+    // Close stdin to signal we're not sending any input
+    // This is important for Claude CLI which may wait for stdin
+    currentProcess.stdin?.end();
 
     let fullOutput = '';
-    let capturedSessionId: string | null = null;
 
     currentProcess.stdout?.on('data', async (data: Buffer) => {
       const content = data.toString();
       fullOutput += content;
-      if (!capturedSessionId) {
-        capturedSessionId = extractSessionId(content);
+      // For Copilot, extract session ID from output (Claude already has it set)
+      if (!capturedSessionId && session.agent !== 'claude') {
+        capturedSessionId = extractSessionId(content, session.agent);
       }
       const entry = createLogEntry(phase, 'stdout', content);
       await appendLog(run.id, entry);
@@ -213,6 +276,7 @@ export async function startNewSession(
   workspaceId: string,
   prompt: string,
   options: {
+    agent?: 'copilot' | 'claude';
     validationPrompt?: string;
     outputPrompt?: string;
     model?: string;
@@ -244,8 +308,8 @@ export async function startNewSession(
     }
   }
 
-  // Create session with branch name
-  const session = await createSession(workspaceId, prompt, branchName, options);
+  // Create session with branch name and agent
+  const session = await createSession(workspaceId, prompt, branchName, { ...options, agent: options.agent });
   currentSessionId = session.id;
   
   // Create first run
@@ -339,10 +403,11 @@ async function executePhases(session: Session, run: Run, onEvent: EventCallback,
         return;
       }
 
-      // Store/update copilot session ID
+      // Store/update CLI session ID
       if (promptResult.copilotSessionId) {
         await updateSessionCopilotId(session.id, promptResult.copilotSessionId);
-        const sessionLog = createLogEntry('prompt', 'system', `Copilot Session ID: ${promptResult.copilotSessionId}`);
+        const agentName = session.agent === 'claude' ? 'Claude' : 'Copilot';
+        const sessionLog = createLogEntry('prompt', 'system', `${agentName} Session ID: ${promptResult.copilotSessionId}`);
         await appendLog(run.id, sessionLog);
         onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: sessionLog });
       }
@@ -367,7 +432,14 @@ async function executePhases(session: Session, run: Run, onEvent: EventCallback,
       await updateValidation(run.id, validationResult);
       onEvent({ type: 'validation', runId: run.id, sessionId: session.id, validation: validationResult });
 
-      const validationPhase = await runCopilotPhaseWithRetry(run, session, 'validation', validationPrompt, onEvent, {
+      // Add context about the original prompt to the validation
+      const contextualValidationPrompt = `CONTEXT - Original task that was executed:
+"""${run.prompt}"""
+
+VALIDATION TASK:
+${validationPrompt}`;
+
+      const validationPhase = await runCopilotPhaseWithRetry(run, session, 'validation', contextualValidationPrompt, onEvent, {
         resumeSession: session.validationSessionId,  // Reuse validation session
         mcps: run.enabledMcps,
       }, workspaceConfig);
@@ -415,9 +487,15 @@ async function executePhases(session: Session, run: Run, onEvent: EventCallback,
       await appendLog(run.id, isolationNote);
       onEvent({ type: 'log', runId: run.id, sessionId: session.id, entry: isolationNote });
       
-      // Augment prompt with the output directory path
+      // Augment prompt with context and output directory path
       const outputsDir = getRunOutputsDir(run.id);
-      const augmentedOutputPrompt = `${outputPrompt}\n\nIMPORTANT: Save all generated images/screenshots to this directory: ${outputsDir}`;
+      const augmentedOutputPrompt = `CONTEXT - Original task that was executed:
+"""${run.prompt}"""
+
+OUTPUT GENERATION TASK:
+${outputPrompt}
+
+IMPORTANT: Save all generated images/screenshots to this directory: ${outputsDir}`;
       
       const outputPhase = await runCopilotPhaseWithRetry(run, session, 'output', augmentedOutputPrompt, onEvent, {
         resumeSession: session.outputSessionId,  // Reuse output session

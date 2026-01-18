@@ -1,4 +1,4 @@
-import type { Config, Session, Run, GitChanges, CommitFile } from '../types';
+import type { Config, Session, Run, GitChanges, CommitFile, AgentType } from '../types';
 
 const API_BASE = '';
 
@@ -50,6 +50,7 @@ export async function fetchCommitDiff(runId: string, filePath: string): Promise<
 export interface CreateSessionParams {
   workspaceId: string;
   prompt: string;
+  agent?: AgentType;
   validationPrompt?: string;
   outputPrompt?: string;
   model?: string;

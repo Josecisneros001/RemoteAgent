@@ -2,6 +2,11 @@ import { useApp } from '../../context/AppContext';
 import { escapeHtml } from '../../utils/helpers';
 import './SessionList.css';
 
+const agentIcons: Record<string, string> = {
+  copilot: '🤖',
+  claude: '🧠',
+};
+
 export function SessionList() {
   const { sessions, currentSessionId, loadSessionDetail } = useApp();
 
@@ -17,7 +22,12 @@ export function SessionList() {
           className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
           onClick={() => loadSessionDetail(session.id)}
         >
-          <div className="session-item-name">{escapeHtml(session.friendlyName)}</div>
+          <div className="session-item-header">
+            <span className="session-item-agent" title={session.agent || 'copilot'}>
+              {agentIcons[session.agent] || agentIcons.copilot}
+            </span>
+            <span className="session-item-name">{escapeHtml(session.friendlyName)}</span>
+          </div>
           <div className="session-item-branch">🌿 {escapeHtml(session.branchName || 'no branch')}</div>
           <div className="session-item-meta">
             <span>{session.runCount} run{session.runCount !== 1 ? 's' : ''}</span>

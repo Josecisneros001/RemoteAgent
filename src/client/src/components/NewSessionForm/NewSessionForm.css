@@ -120,3 +120,44 @@
   gap: 12px;
   margin-top: 8px;
 }
+
+/* Agent Selector */
+.agent-selector {
+  display: flex;
+  gap: 12px;
+}
+
+.agent-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.agent-option:hover {
+  border-color: var(--text-secondary);
+}
+
+.agent-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.agent-option input[type="radio"] {
+  display: none;
+}
+
+.agent-icon {
+  font-size: 1.5rem;
+}
+
+.agent-name {
+  font-weight: 500;
+  font-size: 0.9375rem;
+}

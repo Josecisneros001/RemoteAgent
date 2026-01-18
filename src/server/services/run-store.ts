@@ -5,7 +5,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { getConfigDir, getWorkspace } from './config.js';
 import type { 
   Session, SessionSummary, 
-  Run, RunSummary, LogEntry, ValidationResult, ImageResult, RunPhase, CommitInfo 
+  Run, RunSummary, LogEntry, ValidationResult, ImageResult, RunPhase, CommitInfo,
+  AgentType
 } from '../types.js';
 
 // Write lock to prevent concurrent file writes - uses promise chaining
@@ -79,6 +80,7 @@ export async function createSession(
   initialPrompt: string,
   branchName: string,
   options: {
+    agent?: AgentType;
     validationPrompt?: string;
     outputPrompt?: string;
     model?: string;
@@ -96,6 +98,7 @@ export async function createSession(
 
   const session: Session = {
     id: uuidv4(),
+    agent: options.agent || 'copilot',
     workspaceId,
     workspacePath: workspace.path,
     friendlyName: generateFriendlyName(initialPrompt),
@@ -203,6 +206,7 @@ export async function listSessions(workspaceId?: string): Promise<SessionSummary
       
       summaries.push({
         id: session.id,
+        agent: session.agent || 'copilot',
         friendlyName: session.friendlyName,
         branchName: session.branchName,
         workspaceId: session.workspaceId,
