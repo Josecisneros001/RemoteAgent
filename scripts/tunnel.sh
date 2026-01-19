@@ -27,9 +27,9 @@ fi
 
 echo "✅ Authenticated with Dev Tunnels"
 echo ""
-echo "🌐 Starting tunnel with anonymous access..."
-echo "   Share the URL below with your phone!"
+echo "🌐 Starting tunnel with same-account access..."
+echo "   You'll need to authenticate with the same Microsoft/GitHub account on your phone."
 echo ""
 
-# Start tunnel with anonymous access
-devtunnel host -p $PORT --allow-anonymous
+# Start tunnel without anonymous access (requires authentication)
+devtunnel host -p $PORT

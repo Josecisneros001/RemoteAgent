@@ -87,6 +87,8 @@ export async function createSession(
     validationModel?: string;
     outputModel?: string;
     enabledMcps?: string[];
+    interactive?: boolean;
+    copilotSessionId?: string;
   } = {}
 ): Promise<Session> {
   await ensureDirs();
@@ -111,6 +113,8 @@ export async function createSession(
     validationModel: options.validationModel || workspace.validationModel,
     outputModel: options.outputModel || workspace.outputModel,
     enabledMcps: options.enabledMcps,
+    interactive: options.interactive || false,
+    copilotSessionId: options.copilotSessionId,
   };
 
   await saveSession(session);
@@ -173,6 +177,16 @@ export async function updateSessionOutputId(sessionId: string, outputSessionId: 
     if (!session) return;
     
     session.outputSessionId = outputSessionId;
+    await saveSession(session);
+  });
+}
+
+export async function updateSessionInteractive(sessionId: string, interactive: boolean): Promise<void> {
+  await withWriteLock(sessionId, async () => {
+    const session = await getSession(sessionId);
+    if (!session) return;
+    
+    session.interactive = interactive;
     await saveSession(session);
   });
 }

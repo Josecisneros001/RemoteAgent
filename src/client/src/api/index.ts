@@ -47,6 +47,38 @@ export async function fetchCommitDiff(runId: string, filePath: string): Promise<
   return res.json();
 }
 
+// ==================== Interactive Session API ====================
+
+export async function resumeSession(sessionId: string): Promise<{ sessionId: string; active: boolean }> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/resume`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || res.statusText);
+  }
+  return res.json();
+}
+
+export async function stopSession(sessionId: string): Promise<{ sessionId: string; stopped: boolean }> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/stop`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || res.statusText);
+  }
+  return res.json();
+}
+
+export async function getSessionStatus(sessionId: string): Promise<{ sessionId: string; active: boolean; interactive: boolean }> {
+  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/status`);
+  if (!res.ok) throw new Error('Failed to fetch session status');
+  return res.json();
+}
+
+// ==================== Session/Run Creation ====================
+
 export interface CreateSessionParams {
   workspaceId: string;
   prompt: string;
@@ -56,9 +88,10 @@ export interface CreateSessionParams {
   model?: string;
   validationModel?: string;
   outputModel?: string;
+  interactive?: boolean;
 }
 
-export async function createSession(params: CreateSessionParams): Promise<{ sessionId: string; runId: string }> {
+export async function createSession(params: CreateSessionParams): Promise<{ sessionId: string; runId?: string; interactive?: boolean }> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -9,6 +9,8 @@ import { initPush } from './services/push.js';
 import { addClient, broadcast } from './services/websocket.js';
 import { registerRoutes } from './routes/api.js';
 import { recoverIncompleteRuns } from './services/orchestrator.js';
+import { attachClient, detachClient, sendInput, resizePty, isSessionActive } from './services/pty-manager.js';
+import type { WsPtyInputEvent, WsPtyResizeEvent } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -48,9 +50,51 @@ async function main() {
   // Register API routes
   await registerRoutes(app);
 
-  // WebSocket endpoint
+  // WebSocket endpoint for general events (logs, phases, etc.)
   app.get('/ws', { websocket: true }, (socket, req) => {
     addClient(socket);
+  });
+
+  // WebSocket endpoint for interactive PTY terminal
+  app.get<{ Params: { sessionId: string } }>('/ws/terminal/:sessionId', { websocket: true }, (socket, req) => {
+    const sessionId = req.params.sessionId;
+    console.log(`[WS] Terminal connection for session ${sessionId}`);
+
+    // Attach client to PTY session
+    if (!isSessionActive(sessionId)) {
+      console.log(`[WS] No active PTY session ${sessionId}, closing connection`);
+      socket.close(4000, 'No active PTY session');
+      return;
+    }
+
+    const attached = attachClient(sessionId, socket);
+    if (!attached) {
+      socket.close(4001, 'Failed to attach to PTY session');
+      return;
+    }
+
+    // Handle incoming messages (user input, resize)
+    socket.on('message', (message: Buffer | string) => {
+      try {
+        const data = JSON.parse(message.toString());
+        
+        if (data.type === 'pty-input') {
+          const inputEvent = data as WsPtyInputEvent;
+          sendInput(sessionId, inputEvent.data);
+        } else if (data.type === 'pty-resize') {
+          const resizeEvent = data as WsPtyResizeEvent;
+          resizePty(sessionId, resizeEvent.cols, resizeEvent.rows);
+        }
+      } catch (error) {
+        console.error(`[WS] Error processing terminal message:`, error);
+      }
+    });
+
+    // Handle disconnect
+    socket.on('close', () => {
+      console.log(`[WS] Terminal connection closed for session ${sessionId}`);
+      detachClient(sessionId, socket);
+    });
   });
 
   // Start server

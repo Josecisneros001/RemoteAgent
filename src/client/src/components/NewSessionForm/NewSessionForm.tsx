@@ -10,7 +10,8 @@ export function NewSessionForm() {
   
   const [workspaceId, setWorkspaceId] = useState('');
   const [prompt, setPrompt] = useState('');
-  const [agent, setAgent] = useState<AgentType>('copilot');
+  const [agent, setAgent] = useState<AgentType>('claude');
+  const [interactive, setInteractive] = useState(true);
   const [model, setModel] = useState('');
   const [validationModel, setValidationModel] = useState('');
   const [outputModel, setOutputModel] = useState('');
@@ -31,23 +32,32 @@ export function NewSessionForm() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     
-    if (!workspaceId || !prompt.trim()) {
-      alert('Please select a workspace and enter a prompt');
+    if (!workspaceId) {
+      alert('Please select a workspace');
+      return;
+    }
+    
+    if (!interactive && !prompt.trim()) {
+      alert('Please enter a prompt for background mode');
       return;
     }
 
     setLoading(true);
 
+    // For interactive sessions without a name, generate a default
+    const sessionPrompt = prompt.trim() || (interactive ? `Interactive Session` : prompt.trim());
+
     try {
       const result = await api.createSession({
         workspaceId,
-        prompt: prompt.trim(),
+        prompt: sessionPrompt,
         agent,
-        validationPrompt: validationPrompt.trim() || undefined,
-        outputPrompt: outputPrompt.trim() || undefined,
+        interactive,
+        validationPrompt: interactive ? undefined : validationPrompt.trim() || undefined,
+        outputPrompt: interactive ? undefined : outputPrompt.trim() || undefined,
         model: model || undefined,
-        validationModel: validationModel || undefined,
-        outputModel: outputModel || undefined,
+        validationModel: interactive ? undefined : validationModel || undefined,
+        outputModel: interactive ? undefined : outputModel || undefined,
       });
 
       setPrompt('');
@@ -118,13 +128,50 @@ export function NewSessionForm() {
         </div>
 
         <div className="form-group">
-          <label htmlFor="prompt">Prompt</label>
+          <label>Execution Mode</label>
+          <div className="mode-selector">
+            <label className={`mode-option ${interactive ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="mode"
+                value="interactive"
+                checked={interactive}
+                onChange={() => setInteractive(true)}
+              />
+              <span className="mode-icon">🖥️</span>
+              <span className="mode-info">
+                <span className="mode-name">Interactive</span>
+                <span className="mode-desc">Full terminal access via browser</span>
+              </span>
+            </label>
+            <label className={`mode-option ${!interactive ? 'selected' : ''}`}>
+              <input
+                type="radio"
+                name="mode"
+                value="background"
+                checked={!interactive}
+                onChange={() => setInteractive(false)}
+              />
+              <span className="mode-icon">📋</span>
+              <span className="mode-info">
+                <span className="mode-name">Background</span>
+                <span className="mode-desc">Auto-run with logs</span>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="prompt">
+            {interactive ? 'Session Name' : 'Prompt'}
+            {interactive && <span className="optional-label">(optional)</span>}
+          </label>
           <textarea
             id="prompt"
             className="input textarea"
-            rows={4}
-            placeholder="What do you want to accomplish?"
-            required
+            rows={interactive ? 2 : 4}
+            placeholder={interactive ? 'Name for this session (optional)' : 'What do you want to accomplish?'}
+            required={!interactive}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
           />
@@ -148,11 +195,13 @@ export function NewSessionForm() {
           </div>
         </div>
 
-        <details 
-          className="advanced-options"
-          open={showAdvanced}
-          onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}
-        >
+        {/* Advanced options only for background mode */}
+        {!interactive && (
+          <details 
+            className="advanced-options"
+            open={showAdvanced}
+            onToggle={(e) => setShowAdvanced((e.target as HTMLDetailsElement).open)}
+          >
           <summary>Advanced Options</summary>
           
           <div className="form-section-header">Model Overrides</div>
@@ -214,6 +263,7 @@ export function NewSessionForm() {
             />
           </div>
         </details>
+        )}
 
         <div className="form-actions">
           <button 

@@ -1,0 +1,111 @@
+.interactive-terminal-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e2e;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.terminal-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  font-size: 12px;
+  color: #a6adc8;
+}
+
+.status-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f38ba8;
+}
+
+.status-indicator.connected {
+  background: #a6e3a1;
+}
+
+.status-indicator.disconnected {
+  background: #f38ba8;
+}
+
+.status-text {
+  flex: 1;
+}
+
+.reconnect-btn {
+  padding: 4px 12px;
+  background: #45475a;
+  color: #cdd6f4;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.reconnect-btn:hover {
+  background: #585b70;
+}
+
+.terminal-wrapper {
+  flex: 1;
+  padding: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.terminal-wrapper .xterm {
+  height: 100%;
+}
+
+.terminal-wrapper .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .interactive-terminal-container {
+    border-radius: 0;
+  }
+
+  .terminal-status {
+    padding: 6px 10px;
+  }
+
+  .terminal-wrapper {
+    padding: 4px;
+  }
+
+  /* Smaller font on mobile for better fit */
+  .terminal-wrapper .xterm {
+    font-size: 11px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .terminal-wrapper .xterm {
+    font-size: 10px !important;
+  }
+}
+
+/* Touch scrolling support */
+.terminal-wrapper .xterm-screen {
+  touch-action: pan-y;
+}
+
+/* Focus styling */
+.terminal-wrapper:focus-within {
+  outline: 2px solid #89b4fa;
+  outline-offset: -2px;
+}
+
+/* Ensure terminal takes full height in container */
+.terminal-wrapper .xterm-screen,
+.terminal-wrapper .xterm-rows {
+  height: 100% !important;
+}

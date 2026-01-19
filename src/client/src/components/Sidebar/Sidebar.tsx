@@ -2,7 +2,11 @@ import { useApp } from '../../context/AppContext';
 import { SessionList } from '../SessionList/SessionList';
 import './Sidebar.css';
 
-export function Sidebar() {
+interface SidebarProps {
+  activeTerminalSessions?: Set<string>;
+}
+
+export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
   const { 
     sidebarOpen, 
     setSidebarOpen, 
@@ -57,7 +61,7 @@ export function Sidebar() {
               ))}
             </select>
           </div>
-          <SessionList />
+          <SessionList activeTerminalSessions={activeTerminalSessions} />
         </div>
       </aside>
 

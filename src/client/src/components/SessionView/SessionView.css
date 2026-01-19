@@ -82,6 +82,9 @@
   overflow-y: auto;
   padding: 16px;
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .run-view-detail {
@@ -131,9 +134,121 @@
   color: var(--text-secondary);
 }
 
+.empty-run-content.interactive-empty {
+  justify-content: flex-start;
+  padding-top: 40px;
+  min-height: auto;
+}
+
 .empty-run-content h3 {
   margin-bottom: 8px;
   color: var(--text-primary);
+}
+
+/* Interactive session controls */
+.interactive-controls {
+  padding: 0 12px;
+  margin-bottom: 12px;
+}
+
+.resume-btn,
+.stop-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.resume-btn {
+  background: #22c55e;
+  color: white;
+}
+
+.resume-btn:hover:not(:disabled) {
+  background: #16a34a;
+}
+
+.resume-btn:disabled {
+  background: #86efac;
+  cursor: not-allowed;
+}
+
+.stop-btn {
+  background: #ef4444;
+  color: white;
+}
+
+.stop-btn:hover {
+  background: #dc2626;
+}
+
+.resume-btn.large {
+  width: auto;
+  padding: 14px 28px;
+  font-size: 1rem;
+  margin-top: 16px;
+}
+
+/* Interactive terminal view */
+.terminal-view {
+  height: 100%;
+  min-height: 400px;
+  max-height: calc(100vh - 200px);
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.terminal-view.hidden {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Terminal instances - stack all terminals, show only visible one */
+.terminal-instance {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.1s ease-in-out;
+}
+
+.terminal-instance.visible {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.terminal-instance.hidden {
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* Keep rendered at full size but just invisible - no visibility:hidden */
+}
+
+.interactive-empty {
+  gap: 8px;
+}
+
+.interactive-empty p {
+  max-width: 400px;
 }
 
 /* Mobile: Stack layout */
@@ -148,5 +263,9 @@
     max-height: 40vh;
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+
+  .terminal-view {
+    min-height: 50vh;
   }
 }

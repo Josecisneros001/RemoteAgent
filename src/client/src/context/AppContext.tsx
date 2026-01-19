@@ -180,14 +180,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
 
     const handleWsEvent = (event: WsEvent) => {
+      // Skip PTY events in main handler - they're handled separately in the terminal component
+      if (event.type === 'pty-data' || event.type === 'interaction-needed' || event.type === 'pty-exit') {
+        return;
+      }
+
       // Update views if applicable (debounced)
       if (event.sessionId === currentSessionIdRef.current) {
-        if (event.runId === currentRunIdRef.current) {
+        if (event.runId && event.runId === currentRunIdRef.current) {
           if (runDetailDebounceRef.current) {
             clearTimeout(runDetailDebounceRef.current);
           }
           runDetailDebounceRef.current = setTimeout(() => {
-            loadRunDetail(event.runId);
+            if (event.runId) {
+              loadRunDetail(event.runId);
+            }
           }, DEBOUNCE_DELAY);
         } else {
           if (sessionRunsDebounceRef.current) {
@@ -203,10 +210,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshSessions();
       }
       
-      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current) {
+      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId) {
         setState(s => ({
           ...s,
-          currentRunId: event.runId,
+          currentRunId: event.runId ?? null,
           currentSessionId: event.sessionId,
         }));
         loadSessionDetail(event.sessionId);

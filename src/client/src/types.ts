@@ -45,6 +45,7 @@ export interface Session {
   createdAt: string;
   runCount: number;
   lastRunStatus?: RunStatus;
+  interactive?: boolean;  // Interactive PTY terminal mode
 }
 
 export interface Run {
@@ -115,12 +116,16 @@ export interface CommitFile {
 
 // WebSocket Event Types
 export interface WsEvent {
-  type: 'log' | 'phase' | 'validation' | 'image' | 'complete';
+  type: 'log' | 'phase' | 'validation' | 'image' | 'complete' | 'pty-data' | 'interaction-needed' | 'pty-exit';
   sessionId: string;
-  runId: string;
+  runId?: string;
   phase?: 'prompt' | 'validation' | 'output';
   content?: string;
   logType?: 'stdout' | 'stderr' | 'system';
+  // PTY-specific fields
+  data?: string;      // Raw terminal data for pty-data
+  reason?: string;    // Reason for interaction-needed
+  exitCode?: number;  // Exit code for pty-exit
 }
 
 // View States

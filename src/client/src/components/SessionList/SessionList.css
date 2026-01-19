@@ -51,6 +51,15 @@
   margin-bottom: 4px;
 }
 
+.session-item-workspace {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .session-item-meta {
   display: flex;
   justify-content: space-between;
@@ -68,3 +77,37 @@
 .session-item-status.completed { background: var(--success); color: #000; }
 .session-item-status.running { background: var(--warning); color: #000; }
 .session-item-status.failed { background: var(--error); color: #fff; }
+
+.session-item-interactive {
+  margin-left: auto;
+  font-size: 0.875rem;
+}
+
+.session-item-mode {
+  font-size: 0.6875rem;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.session-item.interactive {
+  border-left: 3px solid var(--accent);
+}
+
+.session-item.terminal-running {
+  border-left: 3px solid var(--success);
+}
+
+.session-item.terminal-running .session-item-mode {
+  color: var(--success);
+}
+
+.session-item-running {
+  margin-left: auto;
+  font-size: 0.75rem;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

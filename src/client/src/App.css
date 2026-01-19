@@ -50,6 +50,52 @@ body {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  position: relative;
+}
+
+/* App-level terminal container - keeps terminals alive across session switches */
+.app-terminals-container {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.app-terminals-container.hidden {
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.app-terminals-container.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-terminal-instance {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-terminal-instance.visible {
+  z-index: 1;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-terminal-instance.hidden {
+  z-index: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Buttons */

@@ -52,6 +52,7 @@ export interface Session {
   validationModel?: string;       // Model for validation phase
   outputModel?: string;           // Model for output phase
   enabledMcps?: string[];
+  interactive?: boolean;          // Interactive terminal mode (PTY)
 }
 
 // Run (iteration) types - a run is one iteration within a session
@@ -194,7 +195,39 @@ export interface WsCompleteEvent {
   status: 'completed' | 'failed';
 }
 
-export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent;
+// PTY (Interactive Terminal) WebSocket events
+export interface WsPtyDataEvent {
+  type: 'pty-data';
+  sessionId: string;
+  data: string;  // Raw terminal output
+}
+
+export interface WsPtyInputEvent {
+  type: 'pty-input';
+  sessionId: string;
+  data: string;  // User keystroke(s)
+}
+
+export interface WsPtyResizeEvent {
+  type: 'pty-resize';
+  sessionId: string;
+  cols: number;
+  rows: number;
+}
+
+export interface WsInteractionNeededEvent {
+  type: 'interaction-needed';
+  sessionId: string;
+  reason: string;  // e.g., "permission prompt", "confirmation needed"
+}
+
+export interface WsPtyExitEvent {
+  type: 'pty-exit';
+  sessionId: string;
+  exitCode: number;
+}
+
+export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent;
 
 // Push subscription
 export interface PushSubscription {
@@ -216,6 +249,7 @@ export interface CreateSessionRequest {
   validationModel?: string;
   outputModel?: string;
   enabledMcps?: string[];
+  interactive?: boolean;  // Use interactive PTY mode
 }
 
 export interface StartRunRequest {

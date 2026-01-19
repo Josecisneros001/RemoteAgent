@@ -29,6 +29,15 @@
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.optional-label {
+  font-weight: 400;
+  font-size: 0.75rem;
+  color: var(--text-muted, #6b7280);
 }
 
 .input {
@@ -160,4 +169,67 @@
 .agent-name {
   font-weight: 500;
   font-size: 0.9375rem;
+}
+
+/* Mode Selector */
+.mode-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mode-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-option:hover {
+  border-color: var(--text-secondary);
+}
+
+.mode-option.selected {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+}
+
+.mode-option input[type="radio"] {
+  display: none;
+}
+
+.mode-icon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+}
+
+.mode-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mode-name {
+  font-weight: 500;
+  font-size: 0.9375rem;
+}
+
+.mode-desc {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+@media (min-width: 600px) {
+  .mode-selector {
+    flex-direction: row;
+  }
+  
+  .mode-option {
+    flex: 1;
+  }
 }

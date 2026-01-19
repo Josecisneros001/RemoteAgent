@@ -4,12 +4,13 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
-import { listSessions, getSession, listRuns, getRun, getLatestRun, getRunsForSession } from '../services/run-store.js';
+import { listSessions, getSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
 import { startNewSession, continueSession, abortCurrentRun, getCurrentRunId, getCurrentSessionId } from '../services/orchestrator.js';
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
-import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff } from '../services/git.js';
+import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, checkoutMainAndPull, createAndCheckoutBranch, branchExists, checkoutBranch } from '../services/git.js';
+import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions } from '../services/pty-manager.js';
 import type { CreateSessionRequest, StartRunRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -64,7 +65,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // Create new session and start first run
   app.post<{ Body: CreateSessionRequest }>('/api/sessions', async (request, reply) => {
-    const { workspaceId, prompt, agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
+    const { workspaceId, prompt, agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps, interactive } = request.body;
 
     // Validate workspace
     const workspace = getWorkspace(workspaceId);
@@ -77,6 +78,48 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Workspace path does not exist' });
     }
 
+    // Interactive mode: create session and start PTY
+    if (interactive) {
+      // Git branch setup
+      const branchName = generateBranchName(prompt);
+      const isRepo = await isGitRepo(workspace.path);
+      
+      if (isRepo) {
+        try {
+          await checkoutMainAndPull(workspace.path);
+          await createAndCheckoutBranch(workspace.path, branchName);
+        } catch (error) {
+          console.error('Git branch setup failed:', error);
+        }
+      }
+
+      // Generate a CLI session UUID for Claude only (Copilot generates its own)
+      const selectedAgent = agent || 'claude';
+      const cliSessionId = selectedAgent === 'claude' ? uuidv4() : undefined;
+
+      // Create session record
+      const session = await createSessionStore(workspaceId, prompt, branchName, {
+        agent: selectedAgent,
+        validationPrompt,
+        outputPrompt,
+        model,
+        validationModel,
+        outputModel,
+        enabledMcps,
+        interactive: true,
+        copilotSessionId: cliSessionId,
+      });
+
+      // Start PTY session
+      const ptySession = startInteractiveSession(session, prompt, false);
+      if (!ptySession) {
+        return reply.status(500).send({ error: 'Failed to start interactive session' });
+      }
+
+      return { sessionId: session.id, interactive: true };
+    }
+
+    // Non-interactive mode: existing behavior
     // Check if a run is already in progress
     if (getCurrentRunId()) {
       return reply.status(409).send({ error: 'A run is already in progress' });
@@ -117,6 +160,81 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     );
 
     return { runId: run.id };
+  });
+
+  // ==================== INTERACTIVE SESSIONS (PTY) ====================
+
+  // Resume an interactive session (start PTY and attach to existing session)
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/resume', async (request, reply) => {
+    const sessionId = request.params.id;
+    
+    const session = await getSession(sessionId);
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' });
+    }
+
+    // Check if already active
+    if (isSessionActive(sessionId)) {
+      return { sessionId, active: true, message: 'Session already active' };
+    }
+
+    // Git: checkout the session's branch
+    const isRepo = await isGitRepo(session.workspacePath);
+    if (isRepo && session.branchName) {
+      try {
+        const exists = await branchExists(session.workspacePath, session.branchName);
+        if (exists) {
+          await checkoutBranch(session.workspacePath, session.branchName);
+        }
+      } catch (error) {
+        console.error('Git branch checkout failed:', error);
+      }
+    }
+
+    // Start PTY session in resume mode
+    const ptySession = startInteractiveSession(session, undefined, true);
+    if (!ptySession) {
+      return reply.status(500).send({ error: 'Failed to resume interactive session' });
+    }
+
+    // Mark session as interactive
+    await updateSessionInteractive(sessionId, true);
+
+    return { sessionId, active: true };
+  });
+
+  // Stop an interactive session
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/stop', async (request, reply) => {
+    const sessionId = request.params.id;
+    
+    const stopped = stopSession(sessionId);
+    if (!stopped) {
+      return reply.status(404).send({ error: 'No active PTY session found' });
+    }
+
+    return { sessionId, stopped: true };
+  });
+
+  // Get interactive session status
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/status', async (request, reply) => {
+    const sessionId = request.params.id;
+    
+    const session = await getSession(sessionId);
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' });
+    }
+
+    return {
+      sessionId,
+      active: isSessionActive(sessionId),
+      interactive: session.interactive || false,
+    };
+  });
+
+  // List all active PTY sessions
+  app.get('/api/sessions/active', async () => {
+    const activeSessions = getActiveSessions();
+    return { sessions: activeSessions };
   });
 
   // ==================== RUNS ====================
