@@ -12,6 +12,12 @@ import type {
 // Write lock to prevent concurrent file writes - uses promise chaining
 const lockQueues: Map<string, Promise<void>> = new Map();
 
+// Log buffering to prevent excessive file I/O during active runs
+const logBuffers: Map<string, LogEntry[]> = new Map();
+const logFlushTimers: Map<string, NodeJS.Timeout> = new Map();
+const LOG_FLUSH_INTERVAL_MS = 500; // Flush logs every 500ms
+const LOG_BUFFER_MAX_SIZE = 50; // Or when buffer reaches this size
+
 async function withWriteLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
   // Chain onto existing lock
   const previousLock = lockQueues.get(id) || Promise.resolve();
@@ -322,17 +328,83 @@ export async function getRun(runId: string): Promise<Run | null> {
   return null;
 }
 
-export async function appendLog(runId: string, entry: LogEntry): Promise<void> {
+/**
+ * Flush buffered logs to disk for a specific run.
+ * Called periodically and on phase completion.
+ */
+export async function flushLogs(runId: string): Promise<void> {
+  const buffer = logBuffers.get(runId);
+  if (!buffer || buffer.length === 0) return;
+
+  // Clear timer if exists
+  const timer = logFlushTimers.get(runId);
+  if (timer) {
+    clearTimeout(timer);
+    logFlushTimers.delete(runId);
+  }
+
+  // Take the buffer and clear it
+  const entriesToFlush = [...buffer];
+  logBuffers.set(runId, []);
+
   await withWriteLock(runId, async () => {
     const run = await getRun(runId);
     if (!run) return;
-    
-    run.logs.push(entry);
+
+    run.logs.push(...entriesToFlush);
     await saveRun(run);
   });
 }
 
+/**
+ * Append a log entry with buffering to reduce file I/O.
+ * Logs are flushed every LOG_FLUSH_INTERVAL_MS or when buffer is full.
+ */
+export async function appendLog(runId: string, entry: LogEntry): Promise<void> {
+  // Get or create buffer for this run
+  let buffer = logBuffers.get(runId);
+  if (!buffer) {
+    buffer = [];
+    logBuffers.set(runId, buffer);
+  }
+
+  buffer.push(entry);
+
+  // Flush immediately if buffer is full
+  if (buffer.length >= LOG_BUFFER_MAX_SIZE) {
+    await flushLogs(runId);
+    return;
+  }
+
+  // Schedule flush if not already scheduled
+  if (!logFlushTimers.has(runId)) {
+    const timer = setTimeout(() => {
+      logFlushTimers.delete(runId);
+      flushLogs(runId).catch(err => {
+        console.error(`[RunStore] Failed to flush logs for run ${runId}:`, err);
+      });
+    }, LOG_FLUSH_INTERVAL_MS);
+    logFlushTimers.set(runId, timer);
+  }
+}
+
+/**
+ * Clean up log buffer resources for a completed/failed run.
+ * Call this when a run reaches a terminal state.
+ */
+export function cleanupLogBuffer(runId: string): void {
+  const timer = logFlushTimers.get(runId);
+  if (timer) {
+    clearTimeout(timer);
+    logFlushTimers.delete(runId);
+  }
+  logBuffers.delete(runId);
+}
+
 export async function updateRunPhase(runId: string, phase: RunPhase, error?: string): Promise<void> {
+  // Flush any buffered logs before updating phase
+  await flushLogs(runId);
+
   await withWriteLock(runId, async () => {
     const run = await getRun(runId);
     if (!run) return;

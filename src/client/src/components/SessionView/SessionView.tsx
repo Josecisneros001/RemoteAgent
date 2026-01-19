@@ -37,17 +37,19 @@ export function SessionView({
     }
   }, [isTerminalActive, currentSession?.interactive]);
 
-  // Check session status on load
+  // Check session status on load and auto-activate terminal if running
   useEffect(() => {
     if (currentSession?.interactive) {
       getSessionStatus(currentSession.id).then(status => {
         setIsSessionActive(status.active);
         if (status.active) {
           setRunView('terminal');
+          // Notify parent that terminal is active so it renders the terminal component
+          onTerminalActive?.(currentSession.id);
         }
       }).catch(console.error);
     }
-  }, [currentSession?.id, currentSession?.interactive]);
+  }, [currentSession?.id, currentSession?.interactive, onTerminalActive]);
 
   // Auto-select most recent run when session loads (non-interactive)
   useEffect(() => {

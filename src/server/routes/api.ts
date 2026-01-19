@@ -374,6 +374,35 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  // Create a new folder
+  app.post<{ Body: { parentPath: string; folderName: string } }>('/api/browse/create-folder', async (request, reply) => {
+    const { mkdir } = await import('fs/promises');
+    const path = await import('path');
+    
+    const { parentPath, folderName } = request.body;
+    
+    if (!parentPath || !folderName) {
+      return reply.status(400).send({ error: 'parentPath and folderName are required' });
+    }
+    
+    // Sanitize folder name - remove dangerous characters
+    const safeFolderName = folderName.replace(/[/\\:*?"<>|]/g, '').trim();
+    if (!safeFolderName) {
+      return reply.status(400).send({ error: 'Invalid folder name' });
+    }
+    
+    const newPath = path.join(parentPath, safeFolderName);
+    
+    try {
+      await mkdir(newPath, { recursive: false });
+      return { path: newPath, name: safeFolderName };
+    } catch (error) {
+      return reply.status(400).send({ 
+        error: `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      });
+    }
+  });
+
   // ==================== WORKSPACES ====================
 
   // Add a local workspace (optionally create folder and init git)

@@ -190,6 +190,17 @@ export async function browseDirectory(path?: string): Promise<BrowseResult> {
   return data;
 }
 
+export async function createFolder(parentPath: string, folderName: string): Promise<{ path: string; name: string }> {
+  const res = await fetch(`${API_BASE}/api/browse/create-folder`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parentPath, folderName }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
 export async function fetchVapidKey(): Promise<{ publicKey: string }> {
   const res = await fetch(`${API_BASE}/api/push/vapid-key`);
   return res.json();

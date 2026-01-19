@@ -28,20 +28,44 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Write buffer for batching rapid terminal output
   const writeBufferRef = useRef<string>('');
   const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
+  // Constants for buffer management
+  const MAX_WRITE_BUFFER_SIZE = 32768; // 32KB max buffer to prevent memory issues
+  const WRITE_CHUNK_SIZE = 8192; // 8KB chunks for smoother rendering
+
   // Flush buffered writes to terminal (batches rapid updates)
   const flushWrites = useCallback(() => {
-    if (writeBufferRef.current && termRef.current) {
-      termRef.current.write(writeBufferRef.current);
-      writeBufferRef.current = '';
-    }
     writeTimerRef.current = null;
+
+    if (!writeBufferRef.current || !termRef.current) return;
+
+    let dataToWrite = writeBufferRef.current;
+
+    // If buffer is too large, truncate old data to prevent memory issues
+    if (dataToWrite.length > MAX_WRITE_BUFFER_SIZE) {
+      const truncateAmount = dataToWrite.length - MAX_WRITE_BUFFER_SIZE;
+      dataToWrite = dataToWrite.slice(truncateAmount);
+      console.log(`[Terminal] Truncated ${truncateAmount} bytes from buffer`);
+    }
+
+    // Write in chunks to prevent browser freeze during large history loads
+    if (dataToWrite.length > WRITE_CHUNK_SIZE) {
+      const chunk = dataToWrite.slice(0, WRITE_CHUNK_SIZE);
+      writeBufferRef.current = dataToWrite.slice(WRITE_CHUNK_SIZE);
+      termRef.current.write(chunk);
+
+      // Schedule next chunk with requestAnimationFrame for smoother rendering
+      writeTimerRef.current = setTimeout(flushWrites, 8);
+    } else {
+      writeBufferRef.current = '';
+      termRef.current.write(dataToWrite);
+    }
   }, []);
-  
+
   // Buffered write - batches writes within 16ms (60fps)
   const bufferedWrite = useCallback((data: string) => {
     writeBufferRef.current += data;
@@ -99,7 +123,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
           brightWhite: '#a6adc8',
         },
         allowProposedApi: true,
-        scrollback: 10000,
+        scrollback: 2000, // Reduced from 10000 to prevent memory issues with large sessions
       });
 
       const fitAddon = new FitAddon();

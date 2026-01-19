@@ -1,9 +1,10 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import { getConfig } from './config.js';
-import { 
+import {
   createSession, getSession, updateSessionCopilotId, updateSessionValidationId, updateSessionOutputId,
-  createRun, updateRunPhase, appendLog, updateValidation, getRun, getIncompleteRuns, updateRunCommit 
+  createRun, updateRunPhase, appendLog, updateValidation, getRun, getIncompleteRuns, updateRunCommit,
+  flushLogs, cleanupLogBuffer
 } from './run-store.js';
 import { startWatching, stopWatching, getRunOutputsDir } from './image-watcher.js';
 import { sendNotification } from './push.js';
@@ -534,6 +535,9 @@ IMPORTANT: Save all generated images/screenshots to this directory: ${outputsDir
   } catch (error) {
     await handleFailure(session, run, error instanceof Error ? error.message : 'Unknown error', onEvent);
   } finally {
+    // Ensure all logs are flushed and cleanup buffer resources
+    await flushLogs(run.id);
+    cleanupLogBuffer(run.id);
     await stopWatching();
     currentRunId = null;
     currentSessionId = null;

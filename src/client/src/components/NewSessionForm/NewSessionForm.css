@@ -398,6 +398,21 @@
   border-radius: 4px;
 }
 
+.browser-new-folder-btn {
+  padding: 4px 8px;
+  font-size: 0.875rem;
+  margin-left: auto;
+}
+
+.browser-new-folder {
+  display: flex;
+  gap: 8px;
+}
+
+.browser-new-folder .input {
+  flex: 1;
+}
+
 .browser-name-input {
   display: flex;
   gap: 8px;

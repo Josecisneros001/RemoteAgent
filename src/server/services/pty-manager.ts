@@ -9,26 +9,17 @@ import { sendNotification } from './push.js';
 import { updateSessionCopilotId } from './run-store.js';
 import type { Session, WsPtyDataEvent, WsInteractionNeededEvent, WsPtyExitEvent } from '../types.js';
 
-// Patterns that indicate user interaction is needed
-const INTERACTION_PATTERNS = [
-  /\[y\/n\]/i,
-  /\(y\/N\)/i,
-  /\(Y\/n\)/i,
-  /Press Enter to continue/i,
-  /Enter your choice/i,
-  /Do you want to proceed\?/i,
-  /Type 'yes' to confirm/i,
-  /Permission required:/i,
-  /Approve\?/i,
-  /\[Yes\/no\]/i,
-  /Allow this action\?/i,
-  /Continue\?/i,
-  /Confirm\?/i,
-  /Press any key/i,
-];
+// Combined regex pattern for interaction detection (single test instead of 14)
+const INTERACTION_PATTERN = /\[y\/n\]|\(y\/N\)|\(Y\/n\)|Press Enter to continue|Enter your choice|Do you want to proceed\?|Type 'yes' to confirm|Permission required:|Approve\?|\[Yes\/no\]|Allow this action\?|Continue\?|Confirm\?|Press any key/i;
 
 // Idle threshold for detecting waiting state (ms)
 const IDLE_THRESHOLD_MS = 8000;
+
+// Output batching and throttling to prevent overwhelming browser during large history dumps
+const OUTPUT_BATCH_INTERVAL_MS = 16; // ~60fps
+const OUTPUT_MAX_CHUNK_SIZE = 16384; // 16KB max per WebSocket message
+const OUTPUT_MAX_BUFFER_SIZE = 65536; // 64KB max buffer before dropping old data
+const OUTPUT_THROTTLE_MS = 8; // Minimum ms between flushes during heavy load
 
 // Copilot session state directory
 const COPILOT_SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
@@ -69,6 +60,13 @@ interface PtySession {
   lastOutputTime: number;
   idleTimer: NodeJS.Timeout | null;
   isInteractionNotified: boolean;
+  // Output batching to reduce WebSocket overhead
+  outputBuffer: string;
+  outputFlushTimer: NodeJS.Timeout | null;
+  lastFlushTime: number; // For throttling during heavy load
+  // Retry detection buffer (limited size, cleared after use)
+  retryDetectionBuffer: string;
+  retryDetectionComplete: boolean;
 }
 
 // Active PTY sessions by session ID
@@ -172,25 +170,61 @@ export function startInteractiveSession(
       lastOutputTime: Date.now(),
       idleTimer: null,
       isInteractionNotified: false,
+      // Output batching
+      outputBuffer: '',
+      outputFlushTimer: null,
+      lastFlushTime: 0,
+      // Retry detection (limited, cleared after use)
+      retryDetectionBuffer: '',
+      retryDetectionComplete: false,
     };
 
     // Handle PTY output
     ptyProcess.onData((data: string) => {
       ptySession.lastOutputTime = Date.now();
       ptySession.isInteractionNotified = false;
-      
-      // Broadcast to all connected clients
-      const event: WsPtyDataEvent = {
-        type: 'pty-data',
-        sessionId: session.id,
-        data,
-      };
-      
-      broadcastToClients(ptySession, event);
-      
-      // Check for interaction patterns
+
+      // For Claude resume: detect "No conversation found" error and retry with --session-id
+      // Only buffer first 1KB for retry detection, then stop accumulating
+      if (session.agent === 'claude' && resume && !ptySession.retryDetectionComplete && session.copilotSessionId) {
+        ptySession.retryDetectionBuffer += data;
+
+        if (ptySession.retryDetectionBuffer.includes('No conversation found with session ID')) {
+          console.log(`[PTY] Claude resume failed - no conversation found. Restarting with --session-id`);
+          ptySession.retryDetectionComplete = true;
+          ptySession.retryDetectionBuffer = ''; // Clear immediately
+
+          // Kill current process and restart with --session-id
+          ptyProcess.kill();
+          cleanupSession(session.id);
+
+          // Restart with --session-id instead of --resume
+          setTimeout(() => {
+            startInteractiveSession(session, prompt, false); // false = don't resume, use --session-id
+          }, 100);
+          return;
+        }
+
+        // Stop buffering after 1KB - error would have appeared by now
+        if (ptySession.retryDetectionBuffer.length > 1024) {
+          ptySession.retryDetectionComplete = true;
+          ptySession.retryDetectionBuffer = ''; // Free memory
+        }
+      }
+
+      // Batch output for WebSocket to reduce overhead
+      ptySession.outputBuffer += data;
+
+      // Schedule flush if not already scheduled
+      if (!ptySession.outputFlushTimer) {
+        ptySession.outputFlushTimer = setTimeout(() => {
+          flushOutputBuffer(ptySession, session.id);
+        }, OUTPUT_BATCH_INTERVAL_MS);
+      }
+
+      // Check for interaction patterns (only on new data, not buffered)
       checkForInteraction(ptySession, session, data);
-      
+
       // Reset idle timer
       resetIdleTimer(ptySession, session);
     });
@@ -198,13 +232,18 @@ export function startInteractiveSession(
     // Handle PTY exit
     ptyProcess.onExit(({ exitCode }) => {
       console.log(`[PTY] Session ${session.id} exited with code ${exitCode}`);
-      
+
+      // Flush any remaining buffered output before sending exit
+      if (ptySession.outputBuffer) {
+        flushOutputBuffer(ptySession, session.id);
+      }
+
       const event: WsPtyExitEvent = {
         type: 'pty-exit',
         sessionId: session.id,
         exitCode,
       };
-      
+
       broadcastToClients(ptySession, event);
       cleanupSession(session.id);
     });
@@ -331,6 +370,60 @@ export function getActiveSessions(): string[] {
 
 // Internal helpers
 
+/**
+ * Flush batched output to WebSocket clients with chunking and throttling.
+ * Prevents browser crashes when resuming sessions with large history.
+ */
+function flushOutputBuffer(ptySession: PtySession, sessionId: string): void {
+  ptySession.outputFlushTimer = null;
+
+  if (!ptySession.outputBuffer) return;
+
+  const now = Date.now();
+
+  // Throttle: ensure minimum time between flushes during heavy load
+  const timeSinceLastFlush = now - ptySession.lastFlushTime;
+  if (timeSinceLastFlush < OUTPUT_THROTTLE_MS && ptySession.outputBuffer.length < OUTPUT_MAX_CHUNK_SIZE) {
+    // Reschedule flush
+    ptySession.outputFlushTimer = setTimeout(() => {
+      flushOutputBuffer(ptySession, sessionId);
+    }, OUTPUT_THROTTLE_MS - timeSinceLastFlush);
+    return;
+  }
+
+  // If buffer is too large, truncate old data to prevent memory issues
+  if (ptySession.outputBuffer.length > OUTPUT_MAX_BUFFER_SIZE) {
+    const truncateAmount = ptySession.outputBuffer.length - OUTPUT_MAX_BUFFER_SIZE;
+    ptySession.outputBuffer = ptySession.outputBuffer.slice(truncateAmount);
+    console.log(`[PTY] Truncated ${truncateAmount} bytes from buffer to prevent overflow`);
+  }
+
+  // Send in chunks to prevent overwhelming the browser
+  let dataToSend = ptySession.outputBuffer;
+  ptySession.outputBuffer = '';
+  ptySession.lastFlushTime = now;
+
+  // If data is larger than max chunk, send first chunk and reschedule rest
+  if (dataToSend.length > OUTPUT_MAX_CHUNK_SIZE) {
+    const chunk = dataToSend.slice(0, OUTPUT_MAX_CHUNK_SIZE);
+    ptySession.outputBuffer = dataToSend.slice(OUTPUT_MAX_CHUNK_SIZE);
+    dataToSend = chunk;
+
+    // Schedule next chunk with throttling
+    ptySession.outputFlushTimer = setTimeout(() => {
+      flushOutputBuffer(ptySession, sessionId);
+    }, OUTPUT_THROTTLE_MS);
+  }
+
+  const event: WsPtyDataEvent = {
+    type: 'pty-data',
+    sessionId,
+    data: dataToSend,
+  };
+
+  broadcastToClients(ptySession, event);
+}
+
 function broadcastToClients(ptySession: PtySession, event: WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent): void {
   const message = JSON.stringify(event);
   for (const client of ptySession.clients) {
@@ -343,11 +436,9 @@ function broadcastToClients(ptySession: PtySession, event: WsPtyDataEvent | WsIn
 function checkForInteraction(ptySession: PtySession, session: Session, data: string): void {
   if (ptySession.isInteractionNotified) return;
 
-  for (const pattern of INTERACTION_PATTERNS) {
-    if (pattern.test(data)) {
-      notifyInteractionNeeded(ptySession, session, 'Input prompt detected');
-      break;
-    }
+  // Single regex test instead of looping through 14 patterns
+  if (INTERACTION_PATTERN.test(data)) {
+    notifyInteractionNeeded(ptySession, session, 'Input prompt detected');
   }
 }
 
@@ -395,6 +486,12 @@ function cleanupSession(sessionId: string): void {
     if (ptySession.idleTimer) {
       clearTimeout(ptySession.idleTimer);
     }
+    if (ptySession.outputFlushTimer) {
+      clearTimeout(ptySession.outputFlushTimer);
+    }
+    // Clear buffers to free memory
+    ptySession.outputBuffer = '';
+    ptySession.retryDetectionBuffer = '';
     ptySession.clients.clear();
     ptySessions.delete(sessionId);
     console.log(`[PTY] Session ${sessionId} cleaned up`);

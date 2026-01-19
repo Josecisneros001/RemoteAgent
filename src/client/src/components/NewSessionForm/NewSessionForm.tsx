@@ -27,6 +27,8 @@ export function NewSessionForm() {
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [manualPath, setManualPath] = useState('');
+  const [newFolderName, setNewFolderName] = useState('');
+  const [showNewFolderInput, setShowNewFolderInput] = useState(false);
 
   // Load directory contents
   const loadDirectory = async (path?: string) => {
@@ -81,6 +83,25 @@ export function NewSessionForm() {
   const navigateToPath = () => {
     if (manualPath.trim()) {
       loadDirectory(manualPath.trim());
+    }
+  };
+
+  // Create new folder
+  const handleCreateFolder = async () => {
+    if (!browseData || !newFolderName.trim()) return;
+    
+    setBrowseLoading(true);
+    setBrowseError(null);
+    try {
+      const result = await api.createFolder(browseData.current, newFolderName.trim());
+      // Navigate to the newly created folder
+      await loadDirectory(result.path);
+      setNewFolderName('');
+      setShowNewFolderInput(false);
+    } catch (error) {
+      setBrowseError(error instanceof Error ? error.message : 'Failed to create folder');
+    } finally {
+      setBrowseLoading(false);
     }
   };
 
@@ -422,7 +443,37 @@ export function NewSessionForm() {
                 <span className="browser-current-label">Current:</span>
                 <code className="browser-current-path">{browseData?.current || '...'}</code>
                 {browseData?.isGitRepo && <span className="browser-git-badge">🌿 Git</span>}
+                <button
+                  type="button"
+                  className="btn btn-secondary browser-new-folder-btn"
+                  onClick={() => setShowNewFolderInput(!showNewFolderInput)}
+                  title="Create new folder"
+                >
+                  📁+
+                </button>
               </div>
+              
+              {showNewFolderInput && (
+                <div className="browser-new-folder">
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="New folder name..."
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleCreateFolder}
+                    disabled={browseLoading || !newFolderName.trim()}
+                  >
+                    Create
+                  </button>
+                </div>
+              )}
               
               <div className="browser-name-input">
                 <input
