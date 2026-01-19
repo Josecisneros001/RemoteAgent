@@ -28,6 +28,27 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Write buffer for batching rapid terminal output
+  const writeBufferRef = useRef<string>('');
+  const writeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  
+  // Flush buffered writes to terminal (batches rapid updates)
+  const flushWrites = useCallback(() => {
+    if (writeBufferRef.current && termRef.current) {
+      termRef.current.write(writeBufferRef.current);
+      writeBufferRef.current = '';
+    }
+    writeTimerRef.current = null;
+  }, []);
+  
+  // Buffered write - batches writes within 16ms (60fps)
+  const bufferedWrite = useCallback((data: string) => {
+    writeBufferRef.current += data;
+    if (!writeTimerRef.current) {
+      writeTimerRef.current = setTimeout(flushWrites, 16);
+    }
+  }, [flushWrites]);
 
   // Refit terminal when visibility changes
   useEffect(() => {
@@ -119,12 +140,15 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
         const data = JSON.parse(event.data);
         
         if (data.type === 'pty-data') {
-          term?.write(data.data);
+          // Use buffered write to prevent overwhelming the browser with rapid updates
+          bufferedWrite(data.data);
         } else if (data.type === 'interaction-needed') {
           onInteractionNeeded?.(data.reason);
         } else if (data.type === 'pty-exit') {
           onExit?.(data.exitCode);
-          term?.write(`\r\n\x1b[90m--- Session ended (exit code: ${data.exitCode}) ---\x1b[0m\r\n`);
+          // Flush any pending writes before showing exit message
+          flushWrites();
+          termRef.current?.write(`\r\n\x1b[90m--- Session ended (exit code: ${data.exitCode}) ---\x1b[0m\r\n`);
         }
       } catch (e) {
         console.error('[Terminal] Error parsing message:', e);
@@ -162,8 +186,13 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
 
     return () => {
       inputDisposable.dispose();
+      // Clear write buffer timer on cleanup
+      if (writeTimerRef.current) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+      }
     };
-  }, [sessionId, onInteractionNeeded, onExit]);
+  }, [sessionId, onInteractionNeeded, onExit, bufferedWrite, flushWrites]);
 
   // Setup resize observer with debouncing
   useEffect(() => {

@@ -6,7 +6,7 @@ import * as api from '../../api';
 import './NewSessionForm.css';
 
 export function NewSessionForm() {
-  const { config, setCurrentView, loadSessionDetail, refreshSessions } = useApp();
+  const { config, setCurrentView, loadSessionDetail, refreshSessions, loadConfig } = useApp();
   
   const [workspaceId, setWorkspaceId] = useState('');
   const [prompt, setPrompt] = useState('');
@@ -19,6 +19,70 @@ export function NewSessionForm() {
   const [outputPrompt, setOutputPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  
+  // File browser state
+  const [showBrowser, setShowBrowser] = useState(false);
+  const [browseData, setBrowseData] = useState<api.BrowseResult | null>(null);
+  const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [manualPath, setManualPath] = useState('');
+
+  // Load directory contents
+  const loadDirectory = async (path?: string) => {
+    setBrowseLoading(true);
+    setBrowseError(null);
+    try {
+      const data = await api.browseDirectory(path);
+      setBrowseData(data);
+      setManualPath(data.current);
+    } catch (error) {
+      setBrowseError(error instanceof Error ? error.message : 'Failed to browse');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  // Open browser
+  const openBrowser = () => {
+    setShowBrowser(true);
+    loadDirectory();
+  };
+
+  // Select directory as workspace
+  const selectDirectory = async () => {
+    if (!browseData || !newWorkspaceName.trim()) {
+      alert('Please enter a name for this workspace');
+      return;
+    }
+    
+    setBrowseLoading(true);
+    try {
+      const result = await api.addWorkspace({
+        name: newWorkspaceName.trim(),
+        path: browseData.current,
+      });
+      
+      // Refresh config to get new workspace
+      await loadConfig();
+      
+      // Select the new workspace
+      setWorkspaceId(result.workspace.id);
+      setShowBrowser(false);
+      setNewWorkspaceName('');
+    } catch (error) {
+      setBrowseError(error instanceof Error ? error.message : 'Failed to add workspace');
+    } finally {
+      setBrowseLoading(false);
+    }
+  };
+
+  // Navigate to path from manual input
+  const navigateToPath = () => {
+    if (manualPath.trim()) {
+      loadDirectory(manualPath.trim());
+    }
+  };
 
   const handleWorkspaceChange = (wsId: string) => {
     setWorkspaceId(wsId);
@@ -83,7 +147,7 @@ export function NewSessionForm() {
       <form className="session-form" onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="workspace">Workspace</label>
-          <div className="input-with-action">
+          <div className="workspace-selector">
             <select 
               id="workspace"
               className="input" 
@@ -96,6 +160,14 @@ export function NewSessionForm() {
                 <option key={ws.id} value={ws.id}>{ws.name}</option>
               ))}
             </select>
+            <button 
+              type="button" 
+              className="btn btn-secondary browse-btn"
+              onClick={openBrowser}
+              title="Browse filesystem"
+            >
+              📂 Browse
+            </button>
           </div>
         </div>
 
@@ -283,6 +355,96 @@ export function NewSessionForm() {
           </button>
         </div>
       </form>
+
+      {/* File Browser Modal */}
+      {showBrowser && (
+        <div className="browser-modal-overlay" onClick={() => setShowBrowser(false)}>
+          <div className="browser-modal" onClick={e => e.stopPropagation()}>
+            <div className="browser-header">
+              <h3>📂 Select Workspace Directory</h3>
+              <button className="browser-close" onClick={() => setShowBrowser(false)}>×</button>
+            </div>
+            
+            <div className="browser-path-bar">
+              <input
+                type="text"
+                className="input browser-path-input"
+                value={manualPath}
+                onChange={(e) => setManualPath(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && navigateToPath()}
+                placeholder="/path/to/directory"
+              />
+              <button 
+                type="button"
+                className="btn btn-secondary"
+                onClick={navigateToPath}
+                disabled={browseLoading}
+              >
+                Go
+              </button>
+            </div>
+
+            {browseError && (
+              <div className="browser-error">{browseError}</div>
+            )}
+
+            <div className="browser-content">
+              {browseLoading && <div className="browser-loading">Loading...</div>}
+              
+              {browseData && !browseLoading && (
+                <div className="browser-list">
+                  {browseData.parent && (
+                    <div 
+                      className="browser-item browser-item-parent"
+                      onClick={() => loadDirectory(browseData.parent!)}
+                    >
+                      📁 ..
+                    </div>
+                  )}
+                  {browseData.directories.map(dir => (
+                    <div 
+                      key={dir.path}
+                      className="browser-item"
+                      onClick={() => loadDirectory(dir.path)}
+                    >
+                      📁 {dir.name}
+                    </div>
+                  ))}
+                  {browseData.directories.length === 0 && (
+                    <div className="browser-empty">No subdirectories</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="browser-footer">
+              <div className="browser-current">
+                <span className="browser-current-label">Current:</span>
+                <code className="browser-current-path">{browseData?.current || '...'}</code>
+                {browseData?.isGitRepo && <span className="browser-git-badge">🌿 Git</span>}
+              </div>
+              
+              <div className="browser-name-input">
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Workspace name..."
+                  value={newWorkspaceName}
+                  onChange={(e) => setNewWorkspaceName(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={selectDirectory}
+                  disabled={browseLoading || !newWorkspaceName.trim()}
+                >
+                  Add Workspace
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

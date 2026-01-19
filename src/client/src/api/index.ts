@@ -172,6 +172,24 @@ export async function cloneWorkspace(params: CloneWorkspaceParams): Promise<{ wo
   return data;
 }
 
+// Browse filesystem directories
+export interface BrowseResult {
+  current: string;
+  parent: string | null;
+  directories: { name: string; path: string }[];
+  isGitRepo: boolean;
+}
+
+export async function browseDirectory(path?: string): Promise<BrowseResult> {
+  const url = path 
+    ? `${API_BASE}/api/browse?path=${encodeURIComponent(path)}`
+    : `${API_BASE}/api/browse`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
 export async function fetchVapidKey(): Promise<{ publicKey: string }> {
   const res = await fetch(`${API_BASE}/api/push/vapid-key`);
   return res.json();

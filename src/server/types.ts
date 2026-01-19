@@ -24,6 +24,7 @@ export interface Config {
   defaultModel: string;           // Global default for prompt phase
   defaultValidationModel: string; // Global default for validation phase
   defaultOutputModel: string;     // Global default for output phase
+  defaultBrowsePath?: string;     // Default path for workspace browser
   port: number;
   vapidPublicKey?: string;
   vapidPrivateKey?: string;

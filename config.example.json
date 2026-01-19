@@ -10,5 +10,6 @@
   ],
   "mcps": [],
   "model": "claude-sonnet-4",
+  "defaultBrowsePath": "/home/user/projects",
   "port": 3000
 }

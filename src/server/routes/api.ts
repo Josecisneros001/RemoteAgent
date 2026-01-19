@@ -331,6 +331,49 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
   );
 
+  // ==================== FILESYSTEM BROWSING ====================
+
+  // Browse filesystem directories
+  app.get<{ Querystring: { path?: string } }>('/api/browse', async (request, reply) => {
+    const { readdir, stat } = await import('fs/promises');
+    const { homedir } = await import('os');
+    const path = await import('path');
+    
+    // Use config.defaultBrowsePath or fall back to home directory
+    const config = getConfig();
+    const defaultPath = config.defaultBrowsePath || homedir();
+    const browsePath = request.query.path || defaultPath;
+    
+    try {
+      const stats = await stat(browsePath);
+      if (!stats.isDirectory()) {
+        return reply.status(400).send({ error: 'Path is not a directory' });
+      }
+      
+      const entries = await readdir(browsePath, { withFileTypes: true });
+      const directories = entries
+        .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+        .map(entry => ({
+          name: entry.name,
+          path: path.join(browsePath, entry.name),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      
+      const parent = path.dirname(browsePath);
+      
+      return {
+        current: browsePath,
+        parent: parent !== browsePath ? parent : null,
+        directories,
+        isGitRepo: await isGitRepo(browsePath),
+      };
+    } catch (error) {
+      return reply.status(400).send({ 
+        error: `Cannot browse path: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      });
+    }
+  });
+
   // ==================== WORKSPACES ====================
 
   // Add a local workspace (optionally create folder and init git)
