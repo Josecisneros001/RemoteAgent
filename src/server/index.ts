@@ -9,7 +9,7 @@ import { initPush } from './services/push.js';
 import { addClient, broadcast } from './services/websocket.js';
 import { registerRoutes } from './routes/api.js';
 import { recoverIncompleteRuns } from './services/orchestrator.js';
-import { attachClient, detachClient, sendInput, resizePty, isSessionActive } from './services/pty-manager.js';
+import { attachClient, detachClient, sendInput, resizePty, isSessionActive, stopAllSessions } from './services/pty-manager.js';
 import type { WsPtyInputEvent, WsPtyResizeEvent } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -103,7 +103,23 @@ async function main() {
     console.log(`\n🚀 Remote Agent server running at http://localhost:${config.port}`);
     console.log(`📁 Config directory: ~/.remote-agent/`);
     console.log(`\nTo expose to your phone, run: npm run tunnel`);
-    
+
+    // Graceful shutdown handling
+    const shutdown = async (signal: string) => {
+      console.log(`\n⚠️ Received ${signal}, shutting down gracefully...`);
+
+      // Stop all PTY sessions first
+      stopAllSessions();
+
+      // Close the server
+      await app.close();
+      console.log('👋 Server closed');
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+
     // Recover incomplete runs after server starts
     console.log('\n🔄 Checking for incomplete runs...');
     recoverIncompleteRuns(broadcast).catch(err => {

@@ -331,6 +331,14 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   // Cleanup terminal on unmount
   useEffect(() => {
     return () => {
+      // Clear any pending write buffer timer
+      if (writeTimerRef.current) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+      }
+      // Clear the write buffer to free memory
+      writeBufferRef.current = '';
+      // Dispose the terminal
       termRef.current?.dispose();
       termRef.current = null;
       fitAddonRef.current = null;

@@ -215,6 +215,13 @@ export function startInteractiveSession(
       // Batch output for WebSocket to reduce overhead
       ptySession.outputBuffer += data;
 
+      // CRITICAL: Enforce buffer limit during accumulation, not just during flush
+      // This prevents memory exhaustion during large history dumps
+      if (ptySession.outputBuffer.length > OUTPUT_MAX_BUFFER_SIZE) {
+        const truncateAmount = ptySession.outputBuffer.length - OUTPUT_MAX_BUFFER_SIZE;
+        ptySession.outputBuffer = ptySession.outputBuffer.slice(truncateAmount);
+      }
+
       // Schedule flush if not already scheduled
       if (!ptySession.outputFlushTimer) {
         ptySession.outputFlushTimer = setTimeout(() => {
@@ -366,6 +373,28 @@ export function isSessionActive(sessionId: string): boolean {
  */
 export function getActiveSessions(): string[] {
   return Array.from(ptySessions.keys());
+}
+
+/**
+ * Stop all active PTY sessions (for graceful shutdown)
+ */
+export function stopAllSessions(): void {
+  const sessionIds = Array.from(ptySessions.keys());
+  console.log(`[PTY] Stopping all ${sessionIds.length} active session(s)...`);
+
+  for (const sessionId of sessionIds) {
+    try {
+      const ptySession = ptySessions.get(sessionId);
+      if (ptySession) {
+        ptySession.pty.kill();
+        cleanupSession(sessionId);
+      }
+    } catch (error) {
+      console.error(`[PTY] Error stopping session ${sessionId}:`, error);
+    }
+  }
+
+  console.log('[PTY] All sessions stopped');
 }
 
 // Internal helpers
