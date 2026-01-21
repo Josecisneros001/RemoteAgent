@@ -109,3 +109,87 @@
 .terminal-wrapper .xterm-rows {
   height: 100% !important;
 }
+
+/* Modifier toolbar styles */
+.modifier-toggle-btn {
+  padding: 4px 8px;
+  background: #45475a;
+  color: #cdd6f4;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.modifier-toggle-btn:hover {
+  background: #585b70;
+}
+
+.modifier-toggle-btn.active {
+  background: #89b4fa;
+  color: #1e1e2e;
+}
+
+.modifier-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+  flex-wrap: wrap;
+}
+
+.modifier-btn {
+  padding: 6px 12px;
+  background: #45475a;
+  color: #cdd6f4;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 44px;
+  min-height: 36px;
+}
+
+.modifier-btn:hover {
+  background: #585b70;
+}
+
+.modifier-btn.active {
+  background: #89b4fa;
+  color: #1e1e2e;
+}
+
+.modifier-btn.shift-tab-btn {
+  background: #f5c2e7;
+  color: #1e1e2e;
+}
+
+.modifier-btn.shift-tab-btn:hover {
+  background: #f5c2e7;
+  filter: brightness(1.1);
+}
+
+/* Mobile responsive for modifier toolbar */
+@media (max-width: 768px) {
+  .modifier-toolbar {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .modifier-btn {
+    padding: 8px 14px;
+    font-size: 13px;
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 480px) {
+  .modifier-btn {
+    flex: 1;
+    min-width: 60px;
+  }
+}

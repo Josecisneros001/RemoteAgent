@@ -28,6 +28,26 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Modifier toolbar state (used by modifier key toolbar UI - will be implemented in subsequent tasks)
+  const [showModifierToolbar, setShowModifierToolbar] = useState(false);
+  const [activeModifiers, setActiveModifiers] = useState<{
+    ctrl: boolean;
+    alt: boolean;
+    shift: boolean;
+  }>({ ctrl: false, alt: false, shift: false });
+
+  // Send a key sequence to the terminal via WebSocket
+  const sendKeySequence = useCallback((sequence: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'pty-input',
+        sessionId,
+        data: sequence,
+      }));
+    }
+    // Clear modifiers after sending
+    setActiveModifiers({ ctrl: false, alt: false, shift: false });
+  }, [sessionId]);
 
   // Write buffer for batching rapid terminal output
   const writeBufferRef = useRef<string>('');
@@ -218,10 +238,28 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
     // Handle terminal input
     const inputDisposable = term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
+        let modifiedData = data;
+
+        // Apply Ctrl modifier (convert to control character)
+        if (activeModifiers.ctrl && data.length === 1) {
+          const charCode = data.charCodeAt(0);
+          // Convert a-z or A-Z to control characters (Ctrl+A = 0x01, etc.)
+          if ((charCode >= 65 && charCode <= 90) || (charCode >= 97 && charCode <= 122)) {
+            modifiedData = String.fromCharCode((charCode & 0x1f));
+          }
+          setActiveModifiers({ ctrl: false, alt: false, shift: false });
+        }
+
+        // Apply Alt modifier (prepend ESC)
+        if (activeModifiers.alt) {
+          modifiedData = '\x1b' + modifiedData;
+          setActiveModifiers({ ctrl: false, alt: false, shift: false });
+        }
+
         ws.send(JSON.stringify({
           type: 'pty-input',
           sessionId,
-          data,
+          data: modifiedData,
         }));
       }
     });
@@ -234,7 +272,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
         writeTimerRef.current = null;
       }
     };
-  }, [sessionId, onInteractionNeeded, onExit, bufferedWrite, flushWrites]);
+  }, [sessionId, onInteractionNeeded, onExit, bufferedWrite, flushWrites, activeModifiers]);
 
   // Setup resize observer with debouncing
   useEffect(() => {
@@ -360,7 +398,48 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
             Reconnect
           </button>
         )}
+        {isConnected && (
+          <button
+            className={`modifier-toggle-btn ${showModifierToolbar ? 'active' : ''}`}
+            onClick={() => setShowModifierToolbar(!showModifierToolbar)}
+            title="Toggle modifier keys toolbar"
+          >
+            ⌨️
+          </button>
+        )}
       </div>
+      {showModifierToolbar && isConnected && (
+        <div className="modifier-toolbar">
+          <button
+            className="modifier-btn shift-tab-btn"
+            onClick={() => sendKeySequence('\x1b[Z')}
+            title="Shift+Tab"
+          >
+            ⇧Tab
+          </button>
+          <button
+            className={`modifier-btn ${activeModifiers.ctrl ? 'active' : ''}`}
+            onClick={() => setActiveModifiers(prev => ({ ...prev, ctrl: !prev.ctrl }))}
+            title="Ctrl modifier"
+          >
+            Ctrl
+          </button>
+          <button
+            className={`modifier-btn ${activeModifiers.alt ? 'active' : ''}`}
+            onClick={() => setActiveModifiers(prev => ({ ...prev, alt: !prev.alt }))}
+            title="Alt modifier"
+          >
+            Alt
+          </button>
+          <button
+            className="modifier-btn"
+            onClick={() => sendKeySequence('\x1b')}
+            title="Escape"
+          >
+            Esc
+          </button>
+        </div>
+      )}
       <div ref={terminalRef} className="terminal-wrapper" />
     </div>
   );
