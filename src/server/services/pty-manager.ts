@@ -67,6 +67,8 @@ interface PtySession {
   // Retry detection buffer (limited size, cleared after use)
   retryDetectionBuffer: string;
   retryDetectionComplete: boolean;
+  // Flag to indicate PTY is being restarted (don't notify clients of exit)
+  isRestarting: boolean;
 }
 
 // Active PTY sessions by session ID
@@ -106,11 +108,16 @@ export function startInteractiveSession(
   if (session.agent === 'claude') {
     command = 'claude';
     args = [];
-    
+
     // Add model if specified
     const model = session.defaultModel || config.defaultModel;
     if (model) {
       args.push('--model', model);
+    }
+
+    // Only skip permissions when in Docker (Docker uses network filtering)
+    if (process.env.DOCKER_MODE) {
+      args.push('--dangerously-skip-permissions');
     }
 
     // Session management:
@@ -135,6 +142,12 @@ export function startInteractiveSession(
       args.push('--model', model);
     }
 
+    // Only grant full permissions when in Docker (Docker uses network filtering)
+    if (process.env.DOCKER_MODE) {
+      args.push('--allow-all-tools', '--allow-all-paths');
+      envVars['COPILOT_ALLOW_ALL'] = 'true';
+    }
+
     // Session management for Copilot:
     // - Resume: use --resume with the captured session ID
     // - First start: we'll capture the session ID from ~/.copilot/session-state/
@@ -146,8 +159,6 @@ export function startInteractiveSession(
       copilotSessionIdsBefore = getCopilotSessionIds();
       console.log(`[PTY] Copilot first start - capturing ${copilotSessionIdsBefore.size} existing session IDs`);
     }
-
-    envVars['COPILOT_ALLOW_ALL'] = 'true';
   }
 
   console.log(`[PTY] Starting ${session.agent} session in ${workspace.path}`);
@@ -177,11 +188,14 @@ export function startInteractiveSession(
       // Retry detection (limited, cleared after use)
       retryDetectionBuffer: '',
       retryDetectionComplete: false,
+      // Restart flag
+      isRestarting: false,
     };
 
     // Handle PTY output
     ptyProcess.onData((data: string) => {
-      ptySession.lastOutputTime = Date.now();
+      const now = Date.now();
+      ptySession.lastOutputTime = now;
       ptySession.isInteractionNotified = false;
 
       // For Claude resume: detect "No conversation found" error and retry with --session-id
@@ -194,14 +208,14 @@ export function startInteractiveSession(
           ptySession.retryDetectionComplete = true;
           ptySession.retryDetectionBuffer = ''; // Clear immediately
 
-          // Kill current process and restart with --session-id
+          // Mark that we're restarting so onExit doesn't notify clients of exit
+          ptySession.isRestarting = true;
+
+          // Kill current process - DON'T cleanup session, we'll reuse clients
           ptyProcess.kill();
-          cleanupSession(session.id);
 
           // Restart with --session-id instead of --resume
-          setTimeout(() => {
-            startInteractiveSession(session, prompt, false); // false = don't resume, use --session-id
-          }, 100);
+          // The onExit handler will call restartSession which preserves client connections
           return;
         }
 
@@ -232,13 +246,50 @@ export function startInteractiveSession(
       // Check for interaction patterns (only on new data, not buffered)
       checkForInteraction(ptySession, session, data);
 
-      // Reset idle timer
-      resetIdleTimer(ptySession, session);
+      // Reset idle timer only if not already set or if it's been a while
+      // This prevents constant timer churn during rapid output
+      if (!ptySession.idleTimer) {
+        resetIdleTimer(ptySession, session);
+      }
     });
 
     // Handle PTY exit
     ptyProcess.onExit(({ exitCode }) => {
       console.log(`[PTY] Session ${session.id} exited with code ${exitCode}`);
+
+      // If we're restarting (e.g., resume failed), don't notify clients - just restart
+      if (ptySession.isRestarting) {
+        console.log(`[PTY] Restarting session ${session.id} with --session-id`);
+
+        // Preserve clients before cleanup
+        const existingClients = new Set(ptySession.clients);
+
+        // Clear timers but don't remove from ptySessions yet
+        if (ptySession.idleTimer) {
+          clearTimeout(ptySession.idleTimer);
+        }
+        if (ptySession.outputFlushTimer) {
+          clearTimeout(ptySession.outputFlushTimer);
+        }
+
+        // Remove the old session entry
+        ptySessions.delete(session.id);
+
+        // Restart with --session-id instead of --resume
+        setTimeout(() => {
+          const newPtySession = startInteractiveSession(session, prompt, false);
+          if (newPtySession) {
+            // Re-attach existing clients to the new session
+            for (const client of existingClients) {
+              if (client.readyState === 1) { // WebSocket.OPEN
+                newPtySession.clients.add(client);
+              }
+            }
+            console.log(`[PTY] Re-attached ${newPtySession.clients.size} clients to restarted session`);
+          }
+        }, 100);
+        return;
+      }
 
       // Flush any remaining buffered output before sending exit
       if (ptySession.outputBuffer) {
@@ -342,7 +393,7 @@ export function resizePty(sessionId: string, cols: number, rows: number): boolea
   }
 
   ptySession.pty.resize(cols, rows);
-  console.log(`[PTY] Session ${sessionId} resized to ${cols}x${rows}`);
+  // Note: Removed console.log here to reduce I/O during rapid resize events
   return true;
 }
 
@@ -472,11 +523,15 @@ function checkForInteraction(ptySession: PtySession, session: Session, data: str
 }
 
 function resetIdleTimer(ptySession: PtySession, session: Session): void {
+  // Clear existing timer
   if (ptySession.idleTimer) {
     clearTimeout(ptySession.idleTimer);
+    ptySession.idleTimer = null;
   }
 
+  // Set new timer - will be triggered after IDLE_THRESHOLD_MS of no output
   ptySession.idleTimer = setTimeout(() => {
+    ptySession.idleTimer = null; // Clear reference so new timer can be set
     if (!ptySession.isInteractionNotified) {
       // Check if still idle
       const idleTime = Date.now() - ptySession.lastOutputTime;

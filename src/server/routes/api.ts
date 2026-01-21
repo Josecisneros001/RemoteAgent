@@ -339,9 +339,10 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const { homedir } = await import('os');
     const path = await import('path');
     
-    // Use config.defaultBrowsePath or fall back to home directory
+    // Use config.defaultBrowsePath, or /workspace in Docker mode, or fall back to home directory
     const config = getConfig();
-    const defaultPath = config.defaultBrowsePath || homedir();
+    const isDocker = process.env.DOCKER_MODE === 'true';
+    const defaultPath = config.defaultBrowsePath || (isDocker ? '/workspace' : homedir());
     const browsePath = request.query.path || defaultPath;
     
     try {

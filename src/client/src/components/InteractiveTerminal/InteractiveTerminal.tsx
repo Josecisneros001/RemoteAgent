@@ -69,25 +69,43 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   // Buffered write - batches writes within 16ms (60fps)
   const bufferedWrite = useCallback((data: string) => {
     writeBufferRef.current += data;
+
+    // CRITICAL: Enforce buffer limit during accumulation to prevent memory exhaustion
+    if (writeBufferRef.current.length > MAX_WRITE_BUFFER_SIZE) {
+      const truncateAmount = writeBufferRef.current.length - MAX_WRITE_BUFFER_SIZE;
+      writeBufferRef.current = writeBufferRef.current.slice(truncateAmount);
+    }
+
     if (!writeTimerRef.current) {
       writeTimerRef.current = setTimeout(flushWrites, 16);
     }
   }, [flushWrites]);
 
-  // Refit terminal when visibility changes
-  useEffect(() => {
-    if (isVisible && fitAddonRef.current && termRef.current) {
-      // Small delay to ensure container has correct dimensions
-      setTimeout(() => {
-        try {
-          fitAddonRef.current?.fit();
-          termRef.current?.refresh(0, termRef.current.rows - 1);
-        } catch (e) {
-          console.error('[Terminal] Refit on visibility error:', e);
-        }
-      }, 50);
+  // Refit terminal when visibility changes (debounced to prevent excessive calls)
+  const lastRefitRef = useRef<number>(0);
+  const refitTerminal = useCallback(() => {
+    if (!fitAddonRef.current || !termRef.current) return;
+
+    // Debounce: don't refit more than once per 100ms
+    const now = Date.now();
+    if (now - lastRefitRef.current < 100) return;
+    lastRefitRef.current = now;
+
+    try {
+      fitAddonRef.current.fit();
+      // Only refresh visible rows, not full terminal
+      termRef.current.scrollToBottom();
+    } catch (e) {
+      console.error('[Terminal] Refit error:', e);
     }
-  }, [isVisible]);
+  }, []);
+
+  useEffect(() => {
+    if (isVisible) {
+      // Small delay to ensure container has correct dimensions
+      setTimeout(refitTerminal, 50);
+    }
+  }, [isVisible, refitTerminal]);
 
   // Connect WebSocket and setup terminal
   const connect = useCallback(() => {
@@ -276,7 +294,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   // Connect on mount
   useEffect(() => {
     const cleanup = connect();
-    
+
     return () => {
       cleanup?.();
       wsRef.current?.close();
@@ -284,49 +302,34 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
     };
   }, [connect]);
 
-  // Handle visibility change (tab switching) - refit terminal when visible
+  // Consolidated visibility handling - handles both document visibility and intersection
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && fitAddonRef.current && termRef.current) {
-        // Small delay to ensure container has correct dimensions
-        setTimeout(() => {
-          try {
-            fitAddonRef.current?.fit();
-            termRef.current?.refresh(0, termRef.current.rows - 1);
-          } catch (e) {
-            console.error('[Terminal] Refit on visibility error:', e);
-          }
-        }, 50);
+      if (document.visibilityState === 'visible') {
+        setTimeout(refitTerminal, 50);
       }
     };
 
-    // Also handle when terminal container becomes visible in DOM
-    const observer = new IntersectionObserver((entries) => {
+    // IntersectionObserver for when terminal becomes visible in DOM
+    const intersectionObserver = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        if (entry.isIntersecting && fitAddonRef.current && termRef.current) {
-          setTimeout(() => {
-            try {
-              fitAddonRef.current?.fit();
-              termRef.current?.refresh(0, termRef.current.rows - 1);
-            } catch (e) {
-              console.error('[Terminal] Refit on intersection error:', e);
-            }
-          }, 50);
+        if (entry.isIntersecting) {
+          setTimeout(refitTerminal, 50);
         }
       });
-    });
+    }, { threshold: 0.1 }); // Only trigger when at least 10% visible
 
     if (terminalRef.current) {
-      observer.observe(terminalRef.current);
+      intersectionObserver.observe(terminalRef.current);
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      observer.disconnect();
+      intersectionObserver.disconnect();
     };
-  }, []);
+  }, [refitTerminal]);
 
   // Cleanup terminal on unmount
   useEffect(() => {

@@ -127,17 +127,21 @@ async function runCopilotPhase(
       // Claude CLI arguments
       // Note: -p/--print means "print response and exit", prompt is positional at the end
       command = 'claude';
-      
+
       // Generate or reuse session ID for Claude
       const claudeSessionId = options.resumeSession || randomUUID();
-      
+
       args = [
         '-p',  // print mode (non-interactive)
         '--model', model,
-        '--dangerously-skip-permissions',
         '--verbose',
         '--session-id', claudeSessionId,  // Use explicit session ID for persistence
       ];
+
+      // Only skip permissions when NOT in Docker (Docker uses network filtering instead)
+      if (!process.env.DOCKER_MODE) {
+        args.push('--dangerously-skip-permissions');
+      }
       
       // Resume session if we have one
       if (options.resumeSession) {
@@ -158,11 +162,14 @@ async function runCopilotPhase(
       args = [
         '-p', prompt,
         '--model', model,
-        '--allow-all-tools',
-        '--allow-all-paths',
         '--no-color',
       ];
-      envVars['COPILOT_ALLOW_ALL'] = 'true';
+
+      // Only grant full permissions when NOT in Docker (Docker uses network filtering instead)
+      if (!process.env.DOCKER_MODE) {
+        args.push('--allow-all-tools', '--allow-all-paths');
+        envVars['COPILOT_ALLOW_ALL'] = 'true';
+      }
       
       // Resume session if provided
       if (options.resumeSession) {

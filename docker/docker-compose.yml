@@ -1,0 +1,45 @@
+services:
+  remote-agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    ports:
+      - "3000:3000"
+    volumes:
+      # Workspace directory - AI can only access this folder
+      - ~/Desktop/ws/vibecoding:/workspace
+
+      # Whitelist configuration
+      - ./whitelist.json:/app/whitelist.json
+
+      # Claude CLI auth and config (for agent user)
+      - ~/.claude.json:/home/agent/.claude.json
+      - ~/.claude-docker/:/home/agent/.claude/
+
+      # Copilot CLI auth and config (for agent user)
+      - ~/.copilot-docker:/home/agent/.copilot
+      - ~/.config/github-copilot:/home/agent/.config/github-copilot
+
+      # Blocked requests log (optional - mount to see logs on host)
+      - ./logs:/var/log/proxy
+
+      # RemoteAgent data (sessions, runs, config)
+      - ~/.remote-agent-docker:/home/agent/.remote-agent
+    environment:
+      - NODE_ENV=production
+      - DOCKER_MODE=true
+      - WORKSPACE_PATH=/workspace
+    cap_add:
+      # Required for iptables to redirect traffic through proxy
+      - NET_ADMIN
+    extra_hosts:
+      # Allow container to access host machine services (e.g., local API on port 4000)
+      - "host.docker.internal:host-gateway"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped

@@ -76,14 +76,29 @@ async function main() {
     // Handle incoming messages (user input, resize)
     socket.on('message', (message: Buffer | string) => {
       try {
-        const data = JSON.parse(message.toString());
-        
+        const messageStr = message.toString();
+
+        // Limit message size to prevent DoS (64KB should be more than enough for input/resize)
+        if (messageStr.length > 65536) {
+          console.warn(`[WS] Dropping oversized message (${messageStr.length} bytes) for session ${sessionId}`);
+          return;
+        }
+
+        const data = JSON.parse(messageStr);
+
         if (data.type === 'pty-input') {
           const inputEvent = data as WsPtyInputEvent;
-          sendInput(sessionId, inputEvent.data);
+          // Limit input data size (16KB max for a single input event)
+          if (inputEvent.data && inputEvent.data.length <= 16384) {
+            sendInput(sessionId, inputEvent.data);
+          }
         } else if (data.type === 'pty-resize') {
           const resizeEvent = data as WsPtyResizeEvent;
-          resizePty(sessionId, resizeEvent.cols, resizeEvent.rows);
+          // Validate resize dimensions
+          if (resizeEvent.cols > 0 && resizeEvent.cols <= 500 &&
+              resizeEvent.rows > 0 && resizeEvent.rows <= 500) {
+            resizePty(sessionId, resizeEvent.cols, resizeEvent.rows);
+          }
         }
       } catch (error) {
         console.error(`[WS] Error processing terminal message:`, error);
