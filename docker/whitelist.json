@@ -1,9 +1,0 @@
-{
-  "allowedDomains": [
-    "github.com",
-    "api.github.com",
-    "localhost",
-    "host.docker.internal"
-  ],
-  "description": "Domains allowed for POST/PUT/DELETE/PATCH requests. GET/HEAD/OPTIONS are always allowed."
-}

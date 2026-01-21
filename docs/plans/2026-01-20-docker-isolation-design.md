@@ -1,101 +1,146 @@
-# Docker Isolation with Network Filtering
+# Docker Isolation with DNS-Based Network Filtering
 
 ## Overview
 
-Add Docker support to RemoteAgent for running AI agents (Claude/Copilot) in an isolated container with network filtering. The AI can run freely but outbound POST/PUT/DELETE requests are blocked unless the domain is whitelisted.
+Docker support for RemoteAgent running AI agents (Claude/Copilot) in an isolated container with DNS-based network filtering. The AI runs freely but can only connect to allowlisted domains.
 
 ## Goals
 
 1. **Isolation** - AI runs inside container, can only access mounted workspace folder
-2. **Network filtering** - Allow all GET requests, block POST/PUT/DELETE except whitelisted domains
-3. **Transparency** - Log blocked requests for visibility
-4. **Support both CLIs** - Claude and Copilot CLI work inside container
+2. **Network filtering** - Only allowlisted domains can be resolved/accessed
+3. **No TLS interception** - Works with certificate pinning, no MITM proxy
+4. **Hot-reload** - Add domains without restarting container
+5. **Anti-exfiltration** - Block DNS tunneling, ping, direct IP connections
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Docker Container                                       │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │  mitmproxy (transparent proxy)                    │  │
-│  │  - Inspects all HTTP/HTTPS traffic                │  │
-│  │  - Allows GET requests                            │  │
-│  │  - Checks POST/PUT/DELETE against whitelist.json  │  │
-│  │  - Blocks & logs non-whitelisted mutations        │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│  ┌───────────────────────▼───────────────────────────┐  │
-│  │  RemoteAgent Server                               │  │
-│  │  - Fastify + WebSocket                            │  │
-│  │  - PTY sessions for Claude/Copilot CLI            │  │
-│  └───────────────────────────────────────────────────┘  │
-│                          │                              │
-│  ┌───────────────────────▼───────────────────────────┐  │
-│  │  Claude/Copilot CLI                               │  │
-│  │  - Normal permission prompts (no skip flags)      │  │
-│  │  - Network calls route through proxy              │  │
-│  └───────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-         │                              │
-         ▼                              ▼
-   /workspace (mounted)          Allowed external APIs
-   (host folder)                 (api.anthropic.com, etc.)
+┌─────────────────────────────────────────────────────────────┐
+│  Docker Container                                           │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  dnsmasq (local DNS server, port 53)                │   │
+│  │  - Only resolves domains in allowlist.json          │   │
+│  │  - All other queries → NXDOMAIN                     │   │
+│  │  - Watches allowlist.json for hot-reload            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                          │                                  │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  iptables firewall rules                            │   │
+│  │  - Block all direct IP connections (agent user)     │   │
+│  │  - Block ICMP/ping                                  │   │
+│  │  - Block DNS to external servers (only local 53)    │   │
+│  │  - Block FTP/SSH/SMTP ports                         │   │
+│  │  - Allow HTTP/HTTPS only                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                          │                                  │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  RemoteAgent + Claude/Copilot CLI                   │   │
+│  │  - Uses local DNS (resolv.conf → 127.0.0.1)         │   │
+│  │  - TLS passes through untouched                     │   │
+│  │  - Can only reach allowlisted domains               │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## File Structure
 
 ```
 docker/
-├── Dockerfile              # Multi-stage build: Node app + mitmproxy
-├── docker-compose.yml      # Easy startup with volume mounts
-├── whitelist.json          # Allowed domains for POST/PUT/DELETE
-├── proxy/
-│   └── filter.py           # mitmproxy script for filtering logic
-└── entrypoint.sh           # Starts proxy + RemoteAgent server
+├── Dockerfile              # Node + dnsmasq + inotify-tools + iptables
+├── docker-compose.yml      # Container configuration
+├── entrypoint.sh           # Starts dnsmasq, configures firewall, watches allowlist
+├── allowlist.json          # Allowed domains (hot-reload enabled)
+└── dns/
+    └── generate-dnsmasq.sh # Converts allowlist.json → dnsmasq config
 ```
 
-## Proxy Filtering Logic
+## How It Works
 
-```python
-def request(flow):
-    method = flow.request.method
-    host = flow.request.host
+1. **Container starts** → `entrypoint.sh` runs
+2. **DNS setup** → `generate-dnsmasq.sh` creates dnsmasq config from `allowlist.json`
+3. **Firewall setup** → iptables rules block everything except HTTP/HTTPS to resolved domains
+4. **Hot-reload** → `inotifywait` watches `allowlist.json`, regenerates config on change
 
-    # Always allow GET/HEAD/OPTIONS
-    if method in ["GET", "HEAD", "OPTIONS"]:
-        return
+## Security Controls
 
-    # POST/PUT/DELETE/PATCH - check whitelist
-    if host in whitelist["allowedDomains"]:
-        return
+| Threat | Mitigation |
+|--------|------------|
+| DNS tunneling | External DNS blocked, only local dnsmasq allowed |
+| Direct IP access | No DNS resolution = no connection possible |
+| Ping exfiltration | ICMP blocked for agent user |
+| SSH/FTP/SMTP | Ports 21, 22, 23, 25, 465, 587 blocked |
+| Certificate pinning bypass | No MITM - TLS passes through untouched |
 
-    # Block and log
-    log_blocked_request(method, host, flow.request.path)
-    flow.kill()
+## Default Allowlist
+
+```json
+{
+  "domains": [
+    "api.anthropic.com",
+    "claude.ai",
+    "github.com",
+    "api.github.com",
+    "githubusercontent.com",
+    "registry.npmjs.org",
+    "pypi.org",
+    "google.com",
+    "bing.com",
+    "duckduckgo.com"
+  ]
+}
 ```
 
-## Default Whitelist
+Each domain automatically includes all subdomains (e.g., `github.com` also allows `raw.githubusercontent.com` won't work - you need `githubusercontent.com` to allow `raw.githubusercontent.com`).
 
-- `api.anthropic.com` - Claude API
-- `api.githubcopilot.com` - Copilot API
-- `registry.npmjs.org` - npm install
-- `pypi.org` - pip install
-- `files.pythonhosted.org` - pip packages
-- `github.com` - git operations
-- `api.github.com` - GitHub API
+## Usage
+
+### Enable network filtering
+
+```yaml
+# docker-compose.yml
+environment:
+  - ENABLE_NETWORK_FILTER=true
+```
+
+### Add a domain (hot-reload)
+
+Edit `allowlist.json` on the host - changes apply within seconds without restart.
+
+### Check DNS logs
+
+```bash
+docker exec remote-agent cat /var/log/dns/dnsmasq-gen.log
+```
+
+### Test domain resolution inside container
+
+```bash
+docker exec -u agent remote-agent nslookup github.com
+# Should resolve
+
+docker exec -u agent remote-agent nslookup evil.com
+# Should return NXDOMAIN
+```
 
 ## Volume Mounts
 
 ```yaml
 volumes:
   - ./workspace:/workspace              # Working directory
-  - ./docker/whitelist.json:/app/whitelist.json
-  - ~/.claude:/root/.claude             # Claude auth
-  - ~/.copilot:/root/.copilot           # Copilot auth
-  - ~/.config/github-copilot:/root/.config/github-copilot
+  - ./allowlist.json:/app/allowlist.json  # Domain allowlist (hot-reload)
+  - ~/.claude.json:/home/agent/.claude.json  # Claude auth
+  - ~/.claude-docker/:/home/agent/.claude/
 ```
 
-## Changes to Existing Code
+## Capabilities Required
 
-- `orchestrator.ts`: Detect Docker environment, remove `--dangerously-skip-permissions` when in container
-- Config: Add `DOCKER_MODE` environment variable detection
+- `NET_ADMIN` - Required for iptables firewall rules
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_NETWORK_FILTER` | `false` | Enable DNS-based network filtering |
+| `DOCKER_MODE` | `true` | Indicates running in Docker |
+| `WORKSPACE_PATH` | `/workspace` | Path to workspace inside container |

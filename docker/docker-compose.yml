@@ -12,8 +12,8 @@ services:
       # Workspace directory - AI can only access this folder
       - ~/Desktop/ws/vibecoding:/workspace
 
-      # Whitelist configuration
-      - ./whitelist.json:/app/whitelist.json
+      # Allowlist configuration (hot-reload enabled)
+      - ./allowlist.json:/app/allowlist.json
 
       # Claude CLI auth and config (for agent user)
       - ~/.claude.json:/home/agent/.claude.json
@@ -23,8 +23,8 @@ services:
       - ~/.copilot-docker:/home/agent/.copilot
       - ~/.config/github-copilot:/home/agent/.config/github-copilot
 
-      # Blocked requests log (optional - mount to see logs on host)
-      - ./logs:/var/log/proxy
+      # DNS logs (optional - mount to see logs on host)
+      - ./logs:/var/log/dns
 
       # RemoteAgent data (sessions, runs, config)
       - ~/.remote-agent-docker:/home/agent/.remote-agent
@@ -32,8 +32,10 @@ services:
       - NODE_ENV=production
       - DOCKER_MODE=true
       - WORKSPACE_PATH=/workspace
+      # Set to false to disable DNS-based network filtering
+      - ENABLE_NETWORK_FILTER=true
     cap_add:
-      # Required for iptables to redirect traffic through proxy
+      # Required for iptables firewall rules
       - NET_ADMIN
     extra_hosts:
       # Allow container to access host machine services (e.g., local API on port 4000)
