@@ -1,0 +1,178 @@
+# LiteLLM Proxy Config for Claude Code + GitHub Copilot
+# 
+# This config routes Claude Code's Anthropic-format requests through
+# GitHub Copilot's models.
+#
+# Run with: litellm --config github_copilot_proxy_config.yaml --port 4000
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+# SETUP INSTRUCTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 1. Start the proxy:
+#    litellm --config github_copilot_proxy_config.yaml --port 4000
+#
+# 2. First run will prompt GitHub device auth - follow the instructions
+#
+# 3. Configure Claude Code:
+#    export ANTHROPIC_BASE_URL="http://localhost:4000"
+#    export ANTHROPIC_AUTH_TOKEN="sk-1234"
+#
+# 4. Start Claude Code:
+#    claude
+#
+# ═══════════════════════════════════════════════════════════════════════════════
+
+model_list:
+  # ─────────────────────────────────────────────────
+  # Claude Code Default Models (v2.1.14+)
+  # These are the model names Claude Code requests by default
+  # ─────────────────────────────────────────────────
+  - model_name: claude-sonnet-4-5-20250929
+    litellm_params:
+      model: github_copilot/claude-sonnet-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: github_copilot/claude-haiku-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-opus-4-5-20251101
+    litellm_params:
+      model: github_copilot/claude-opus-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  # ─────────────────────────────────────────────────
+  # Older Claude Code model names (for compatibility)
+  # ─────────────────────────────────────────────────
+  - model_name: claude-3-5-sonnet-20241022
+    litellm_params:
+      model: github_copilot/claude-sonnet-4
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-3-5-haiku-20241022
+    litellm_params:
+      model: github_copilot/claude-haiku-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-sonnet-4-20250514
+    litellm_params:
+      model: github_copilot/claude-sonnet-4
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  # ─────────────────────────────────────────────────
+  # Direct model names (for /model command)
+  # ─────────────────────────────────────────────────
+  - model_name: claude-sonnet-4
+    litellm_params:
+      model: github_copilot/claude-sonnet-4
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-sonnet-4.5
+    litellm_params:
+      model: github_copilot/claude-sonnet-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-opus-4.5
+    litellm_params:
+      model: github_copilot/claude-opus-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: claude-haiku-4.5
+    litellm_params:
+      model: github_copilot/claude-haiku-4.5
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  # ─────────────────────────────────────────────────
+  # GPT Models (for /model gpt-4o)
+  # ─────────────────────────────────────────────────
+  - model_name: gpt-4o
+    litellm_params:
+      model: github_copilot/gpt-4o
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: github_copilot/gpt-4o-mini
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  # ─────────────────────────────────────────────────
+  # Reasoning Models
+  # ─────────────────────────────────────────────────
+  - model_name: o1
+    litellm_params:
+      model: github_copilot/o1
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  - model_name: o3-mini
+    litellm_params:
+      model: github_copilot/o3-mini
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+  # ─────────────────────────────────────────────────
+  # Gemini (for /model gemini-2.5-pro)
+  # ─────────────────────────────────────────────────
+  - model_name: gemini-2.5-pro
+    litellm_params:
+      model: github_copilot/gemini-2.5-pro
+      extra_headers:
+        editor-version: "vscode/1.95.0"
+        editor-plugin-version: "copilot-chat/0.26.7"
+        copilot-integration-id: "vscode-chat"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# General Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+general_settings:
+  # No master_key = no auth required (local development only)
+  # If you want auth without a database, use LITELLM_MASTER_KEY env var instead
+  disable_key_authentication: true
+  
+# ═══════════════════════════════════════════════════════════════════════════════
+# Litellm Settings
+# ═══════════════════════════════════════════════════════════════════════════════
+litellm_settings:
+  telemetry: false

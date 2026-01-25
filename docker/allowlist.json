@@ -20,6 +20,10 @@
 
     "google.com",
     "bing.com",
-    "duckduckgo.com"
+    "duckduckgo.com",
+    "docs.coqui.ai",
+    "tts.readthedocs.io",
+    "platform.openai.com",
+    "learn.microsoft.com"
   ]
 }
