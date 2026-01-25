@@ -4,6 +4,7 @@
 services:
   litellm:
     image: docker.litellm.ai/berriai/litellm:main-stable
+    restart: unless-stopped
     ports:
       - "4000:4000"
     volumes:
