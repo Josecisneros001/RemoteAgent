@@ -47,9 +47,6 @@ self.addEventListener('notificationclick', (event) => {
 const CACHE_NAME = 'remote-agent-v1';
 const STATIC_ASSETS = [
   '/',
-  '/index.html',
-  '/styles/main.css',
-  '/js/app.js',
 ];
 
 self.addEventListener('install', (event) => {

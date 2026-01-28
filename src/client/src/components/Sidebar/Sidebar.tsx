@@ -1,4 +1,5 @@
 import { useApp } from '../../context/AppContext';
+import { useNotifications } from '../../hooks/useNotifications';
 import { SessionList } from '../SessionList/SessionList';
 import './Sidebar.css';
 
@@ -7,9 +8,9 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
-  const { 
-    sidebarOpen, 
-    setSidebarOpen, 
+  const {
+    sidebarOpen,
+    setSidebarOpen,
     connectionStatus,
     setCurrentView,
     config,
@@ -17,6 +18,8 @@ export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
     setWorkspaceFilter,
     loadSessions,
   } = useApp();
+
+  const { notificationsEnabled, isSubscribing, toggleNotifications } = useNotifications();
 
   const handleNewSession = () => {
     setCurrentView('new-session');
@@ -33,12 +36,23 @@ export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <h1>🤖 Remote Agent</h1>
-          <div className="connection-status desktop-only">
-            <span className={`status-dot ${connectionStatus}`}></span>
-            <span className="status-text">
-              {connectionStatus === 'connected' ? 'Connected' : 
-               connectionStatus === 'disconnected' ? 'Disconnected' : 'Connecting...'}
-            </span>
+          <div className="header-status">
+            <button
+              className={`notification-toggle ${notificationsEnabled ? 'enabled' : ''} ${isSubscribing ? 'subscribing' : ''}`}
+              onClick={toggleNotifications}
+              disabled={isSubscribing || notificationsEnabled === null}
+              aria-label={notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
+              title={notificationsEnabled ? 'Notifications on' : 'Notifications off'}
+            >
+              {notificationsEnabled ? '🔔' : '🔕'}
+            </button>
+            <div className="connection-status">
+              <span className={`status-dot ${connectionStatus}`}></span>
+              <span className="status-text desktop-only">
+                {connectionStatus === 'connected' ? 'Connected' :
+                 connectionStatus === 'disconnected' ? 'Disconnected' : 'Connecting...'}
+              </span>
+            </div>
           </div>
         </div>
 

@@ -6,7 +6,7 @@ export function MobileHeader() {
 
   return (
     <header className="mobile-header">
-      <button 
+      <button
         className={`menu-toggle ${sidebarOpen ? 'active' : ''}`}
         onClick={() => setSidebarOpen(!sidebarOpen)}
         aria-label="Toggle menu"

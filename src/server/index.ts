@@ -23,7 +23,7 @@ async function main() {
 
   // Create Fastify instance
   const app = Fastify({
-    logger: true,
+    logger: false,
   });
 
   // Register WebSocket plugin

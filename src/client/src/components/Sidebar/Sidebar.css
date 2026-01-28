@@ -21,12 +21,58 @@
 .sidebar-header {
   padding: 16px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .sidebar-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
-  margin-bottom: 8px;
+  margin: 0;
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-toggle {
+  background: none;
+  border: none;
+  font-size: 1.125rem;
+  cursor: pointer;
+  padding: 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.notification-toggle:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.notification-toggle.enabled {
+  opacity: 1;
+}
+
+.notification-toggle.subscribing {
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.notification-toggle:disabled {
+  cursor: not-allowed;
+}
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .desktop-only {
