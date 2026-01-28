@@ -70,7 +70,7 @@ npm run dev
 
 Open **http://localhost:3000** - Select workspace - Choose agent - Start coding!
 
-## Docker Deployment
+## Docker Setup
 
 For **secure sandboxed execution** with network filtering:
 
@@ -149,13 +149,15 @@ Config file: ~/.remote-agent/config.json
 **Install Claude Code:**
 ```bash
 npm install -g @anthropic-ai/claude-code
-claude auth
+claude 
+  /login
 ```
 
 **Install GitHub Copilot CLI:**
 ```bash
 npm install -g @github/copilot
-copilot login
+copilot 
+ /login
 ```
 
 ## Project Structure
