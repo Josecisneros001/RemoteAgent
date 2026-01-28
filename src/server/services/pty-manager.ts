@@ -304,13 +304,16 @@ export function startInteractiveSession(
       }, 500);
     }
     
-    // For Copilot: detect and save the new session ID after a short delay
+    // For Copilot: detect and save the new session ID after a delay
+    // Copilot may take a while to create its session directory, so we retry
     if (copilotSessionIdsBefore !== null) {
       console.log(`[PTY] Will detect Copilot session ID. Before IDs count: ${copilotSessionIdsBefore.size}`);
-      setTimeout(async () => {
+
+      const detectWithRetry = async (attempt: number, maxAttempts: number) => {
         const newSessionId = detectNewCopilotSessionId(copilotSessionIdsBefore!);
         const afterIds = getCopilotSessionIds();
-        console.log(`[PTY] After IDs count: ${afterIds.size}, new session ID: ${newSessionId}`);
+        console.log(`[PTY] Detection attempt ${attempt}/${maxAttempts}: After IDs count: ${afterIds.size}, new session ID: ${newSessionId}`);
+
         if (newSessionId) {
           console.log(`[PTY] Detected Copilot session ID: ${newSessionId}`);
           try {
@@ -319,10 +322,16 @@ export function startInteractiveSession(
           } catch (error) {
             console.error(`[PTY] Failed to save Copilot session ID:`, error);
           }
+        } else if (attempt < maxAttempts) {
+          // Retry after another delay
+          setTimeout(() => detectWithRetry(attempt + 1, maxAttempts), 3000);
         } else {
-          console.log(`[PTY] No new Copilot session ID detected`);
+          console.log(`[PTY] No new Copilot session ID detected after ${maxAttempts} attempts`);
         }
-      }, 5000); // Wait 5 seconds for Copilot to create its session
+      };
+
+      // First attempt after 3 seconds, retry up to 5 times (15 seconds total)
+      setTimeout(() => detectWithRetry(1, 5), 3000);
     }
     
     return ptySession;
