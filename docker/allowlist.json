@@ -24,6 +24,11 @@
     "docs.coqui.ai",
     "tts.readthedocs.io",
     "platform.openai.com",
-    "learn.microsoft.com"
+    "learn.microsoft.com",
+    "coqui.gateway.scarf.sh",                                                                                                                                                                                    
+    "github.com",                                                                                                                                                                                  
+    "huggingface.co",                                                                                                                                                                                            
+    "cdn-lfs.huggingface.co",
+    "xethub.com"
   ]
 }

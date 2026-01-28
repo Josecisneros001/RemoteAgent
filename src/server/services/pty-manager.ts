@@ -109,12 +109,6 @@ export function startInteractiveSession(
     command = 'claude';
     args = [];
 
-    // Add model if specified
-    const model = session.defaultModel || config.defaultModel;
-    if (model) {
-      args.push('--model', model);
-    }
-
     // Only skip permissions when in Docker (Docker uses network filtering)
     if (process.env.DOCKER_MODE) {
       args.push('--dangerously-skip-permissions');
@@ -136,11 +130,6 @@ export function startInteractiveSession(
     // Copilot CLI
     command = 'copilot';
     args = [];
-
-    const model = session.defaultModel || config.defaultModel;
-    if (model) {
-      args.push('--model', model);
-    }
 
     // Only grant full permissions when in Docker (Docker uses network filtering)
     if (process.env.DOCKER_MODE) {

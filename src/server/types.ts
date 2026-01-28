@@ -3,27 +3,11 @@ export interface WorkspaceConfig {
   id: string;
   name: string;
   path: string;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  defaultModel?: string;         // Default model for prompt phase
-  validationModel?: string;      // Default model for validation phase
-  outputModel?: string;          // Default model for output phase
   gitRepo?: string;              // Git URL for cloning new workspaces
-}
-
-export interface McpConfig {
-  id: string;
-  name: string;
-  enabled: boolean;
 }
 
 export interface Config {
   workspaces: WorkspaceConfig[];
-  mcps: McpConfig[];
-  availableModels: string[];
-  defaultModel: string;           // Global default for prompt phase
-  defaultValidationModel: string; // Global default for validation phase
-  defaultOutputModel: string;     // Global default for output phase
   defaultBrowsePath?: string;     // Default path for workspace browser
   port: number;
   vapidPublicKey?: string;
@@ -38,25 +22,17 @@ export type AgentType = 'copilot' | 'claude';
 export interface Session {
   id: string;                    // Our internal session ID (UUID)
   agent: AgentType;              // Which CLI agent owns this session
-  copilotSessionId?: string;     // CLI session ID for main prompt (works for both agents)
-  validationSessionId?: string;  // Hidden session for validation
-  outputSessionId?: string;      // Hidden session for output generation
+  copilotSessionId?: string;     // CLI session ID (works for both agents)
   workspaceId: string;
   workspacePath: string;
   friendlyName: string;          // First ~50 chars of initial prompt
   branchName: string;            // Git branch for this session
   createdAt: string;
   updatedAt: string;
-  defaultValidationPrompt?: string;
-  defaultOutputPrompt?: string;
-  defaultModel?: string;
-  validationModel?: string;       // Model for validation phase
-  outputModel?: string;           // Model for output phase
-  enabledMcps?: string[];
   interactive?: boolean;          // Interactive terminal mode (PTY)
 }
 
-// Run (iteration) types - a run is one iteration within a session
+// Run (iteration) types - kept for backwards compatibility with stored data
 export type RunPhase = 'pending' | 'prompt' | 'validation' | 'output' | 'completed' | 'failed';
 
 export interface LogEntry {
@@ -93,12 +69,6 @@ export interface Run {
   id: string;
   sessionId: string;            // Links to parent session
   prompt: string;
-  validationPrompt?: string;    // Override for this run
-  outputPrompt?: string;        // Override for this run
-  model?: string;               // Override model for prompt phase
-  validationModel?: string;     // Override model for validation phase
-  outputModel?: string;         // Override model for output phase
-  enabledMcps?: string[];       // Override MCPs for this run
   status: RunPhase;
   logs: LogEntry[];
   validation: ValidationResult;
@@ -244,33 +214,10 @@ export interface CreateSessionRequest {
   workspaceId: string;
   prompt: string;
   agent?: AgentType;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  model?: string;
-  validationModel?: string;
-  outputModel?: string;
-  enabledMcps?: string[];
-  interactive?: boolean;  // Use interactive PTY mode
-}
-
-export interface StartRunRequest {
-  sessionId: string;
-  prompt: string;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  model?: string;
-  validationModel?: string;
-  outputModel?: string;
-  enabledMcps?: string[];
 }
 
 export interface CloneWorkspaceRequest {
   gitUrl: string;
   name: string;
   targetPath?: string;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  defaultModel?: string;
-  validationModel?: string;
-  outputModel?: string;
 }

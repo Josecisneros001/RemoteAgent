@@ -6,9 +6,8 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import { loadConfig, getConfig } from './services/config.js';
 import { initPush } from './services/push.js';
-import { addClient, broadcast } from './services/websocket.js';
+import { addClient } from './services/websocket.js';
 import { registerRoutes } from './routes/api.js';
-import { recoverIncompleteRuns } from './services/orchestrator.js';
 import { attachClient, detachClient, sendInput, resizePty, isSessionActive, stopAllSessions } from './services/pty-manager.js';
 import type { WsPtyInputEvent, WsPtyResizeEvent } from './types.js';
 
@@ -134,12 +133,6 @@ async function main() {
 
     process.on('SIGINT', () => shutdown('SIGINT'));
     process.on('SIGTERM', () => shutdown('SIGTERM'));
-
-    // Recover incomplete runs after server starts
-    console.log('\n🔄 Checking for incomplete runs...');
-    recoverIncompleteRuns(broadcast).catch(err => {
-      console.error('Error during run recovery:', err);
-    });
   } catch (err) {
     app.log.error(err);
     process.exit(1);

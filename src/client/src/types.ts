@@ -3,11 +3,6 @@ export type AgentType = 'copilot' | 'claude';
 
 export interface Config {
   workspaces: WorkspaceConfig[];
-  mcps: McpConfig[];
-  availableModels: string[];
-  defaultModel: string;
-  defaultValidationModel: string;
-  defaultOutputModel: string;
   port: number;
   vapidPublicKey?: string;
 }
@@ -16,19 +11,7 @@ export interface WorkspaceConfig {
   id: string;
   name: string;
   path: string;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  defaultModel?: string;
-  validationModel?: string;
-  outputModel?: string;
   gitRepo?: string;
-}
-
-export interface McpConfig {
-  name: string;
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
 }
 
 export interface Session {
@@ -37,11 +20,6 @@ export interface Session {
   friendlyName: string;
   workspaceId: string;
   branchName?: string;
-  defaultModel?: string;
-  validationModel?: string;
-  outputModel?: string;
-  defaultValidationPrompt?: string;
-  defaultOutputPrompt?: string;
   createdAt: string;
   runCount: number;
   lastRunStatus?: RunStatus;
@@ -53,9 +31,6 @@ export interface Run {
   sessionId: string;
   prompt: string;
   status: RunStatus;
-  model?: string;
-  validationModel?: string;
-  outputModel?: string;
   logs: LogEntry[];
   validation: ValidationResult;
   images: ImageInfo[];

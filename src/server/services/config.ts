@@ -9,25 +9,6 @@ const CONFIG_PATH = join(CONFIG_DIR, 'config.json');
 
 const DEFAULT_CONFIG: Config = {
   workspaces: [],
-  mcps: [],
-  availableModels: [
-    'claude-opus-4.5',
-    'claude-sonnet-4.5',
-    'claude-haiku-4.5',
-    'claude-sonnet-4',
-    'gpt-5.1-codex-max',
-    'gpt-5.1-codex',
-    'gpt-5.2',
-    'gpt-5.1',
-    'gpt-5',
-    'gpt-5.1-codex-mini',
-    'gpt-5-mini',
-    'gpt-4.1',
-    'gemini-3-pro-preview',
-  ],
-  defaultModel: 'claude-opus-4.5',
-  defaultValidationModel: 'claude-sonnet-4.5',
-  defaultOutputModel: 'claude-sonnet-4.5',
   port: 3000,
 };
 
@@ -37,12 +18,12 @@ export async function ensureConfigDir(): Promise<void> {
   if (!existsSync(CONFIG_DIR)) {
     await mkdir(CONFIG_DIR, { recursive: true });
   }
-  
+
   const sessionsDir = join(CONFIG_DIR, 'sessions');
   if (!existsSync(sessionsDir)) {
     await mkdir(sessionsDir, { recursive: true });
   }
-  
+
   const runsDir = join(CONFIG_DIR, 'runs');
   if (!existsSync(runsDir)) {
     await mkdir(runsDir, { recursive: true });
@@ -51,7 +32,7 @@ export async function ensureConfigDir(): Promise<void> {
 
 export async function loadConfig(): Promise<Config> {
   await ensureConfigDir();
-  
+
   if (!existsSync(CONFIG_PATH)) {
     // Create default config
     await writeFile(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
@@ -59,28 +40,11 @@ export async function loadConfig(): Promise<Config> {
     cachedConfig = DEFAULT_CONFIG;
     return DEFAULT_CONFIG;
   }
-  
+
   try {
     const content = await readFile(CONFIG_PATH, 'utf-8');
     const loaded = JSON.parse(content);
-    
-    // Migrate old config format if needed
-    if ('model' in loaded && !('defaultModel' in loaded)) {
-      loaded.defaultModel = loaded.model;
-      delete loaded.model;
-    }
-    if (!loaded.availableModels) {
-      loaded.availableModels = DEFAULT_CONFIG.availableModels;
-    }
-    if (Array.isArray(loaded.mcps) && loaded.mcps.length > 0 && typeof loaded.mcps[0] === 'string') {
-      // Convert old string array to McpConfig array
-      loaded.mcps = loaded.mcps.map((name: string) => ({
-        id: name.toLowerCase().replace(/\s+/g, '-'),
-        name,
-        enabled: true,
-      }));
-    }
-    
+
     const mergedConfig = { ...DEFAULT_CONFIG, ...loaded };
     cachedConfig = mergedConfig;
     return mergedConfig;
@@ -113,7 +77,7 @@ export function getWorkspace(id: string): WorkspaceConfig | undefined {
 
 export async function addWorkspace(workspace: WorkspaceConfig): Promise<void> {
   const config = getConfig();
-  
+
   // Check if workspace with same ID exists
   const existing = config.workspaces.findIndex(w => w.id === workspace.id);
   if (existing >= 0) {
@@ -121,7 +85,7 @@ export async function addWorkspace(workspace: WorkspaceConfig): Promise<void> {
   } else {
     config.workspaces.push(workspace);
   }
-  
+
   await updateConfig({ workspaces: config.workspaces });
 }
 

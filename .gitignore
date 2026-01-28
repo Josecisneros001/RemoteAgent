@@ -46,3 +46,6 @@ pids/
 
 # Playwright test artifacts
 .playwright-mcp/*
+
+# LiteLLM Proxy Config
+litellm-proxy/

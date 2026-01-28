@@ -77,43 +77,16 @@ export async function getSessionStatus(sessionId: string): Promise<{ sessionId: 
   return res.json();
 }
 
-// ==================== Session/Run Creation ====================
+// ==================== Session Creation ====================
 
 export interface CreateSessionParams {
   workspaceId: string;
   prompt: string;
   agent?: AgentType;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  model?: string;
-  validationModel?: string;
-  outputModel?: string;
-  interactive?: boolean;
 }
 
-export async function createSession(params: CreateSessionParams): Promise<{ sessionId: string; runId?: string; interactive?: boolean }> {
+export async function createSession(params: CreateSessionParams): Promise<{ sessionId: string; interactive?: boolean }> {
   const res = await fetch(`${API_BASE}/api/sessions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (data.error) throw new Error(data.error);
-  return data;
-}
-
-export interface CreateRunParams {
-  sessionId: string;
-  prompt: string;
-  validationPrompt?: string;
-  outputPrompt?: string;
-  model?: string;
-  validationModel?: string;
-  outputModel?: string;
-}
-
-export async function createRun(params: CreateRunParams): Promise<{ runId: string }> {
-  const res = await fetch(`${API_BASE}/api/sessions/${params.sessionId}/runs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

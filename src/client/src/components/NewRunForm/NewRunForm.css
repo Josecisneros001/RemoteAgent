@@ -1,9 +1,0 @@
-.new-run-form-container {
-  max-width: 600px;
-}
-
-.run-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}

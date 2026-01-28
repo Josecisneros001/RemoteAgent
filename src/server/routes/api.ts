@@ -5,27 +5,21 @@ import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
 import { listSessions, getSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
-import { startNewSession, continueSession, abortCurrentRun, getCurrentRunId, getCurrentSessionId } from '../services/orchestrator.js';
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
 import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, checkoutMainAndPull, createAndCheckoutBranch, branchExists, checkoutBranch } from '../services/git.js';
 import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions } from '../services/pty-manager.js';
-import type { CreateSessionRequest, StartRunRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
+import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ==================== CONFIG ====================
-  
-  // Get config (workspace list, models, mcps)
+
+  // Get config (workspace list)
   app.get('/api/config', async () => {
     const config = getConfig();
     return {
       workspaces: config.workspaces,
-      mcps: config.mcps,
-      availableModels: config.availableModels,
-      defaultModel: config.defaultModel,
-      defaultValidationModel: config.defaultValidationModel,
-      defaultOutputModel: config.defaultOutputModel,
     };
   });
 
@@ -63,9 +57,9 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { session, runs };
   });
 
-  // Create new session and start first run
+  // Create new session (always interactive)
   app.post<{ Body: CreateSessionRequest }>('/api/sessions', async (request, reply) => {
-    const { workspaceId, prompt, agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps, interactive } = request.body;
+    const { workspaceId, prompt, agent } = request.body;
 
     // Validate workspace
     const workspace = getWorkspace(workspaceId);
@@ -78,88 +72,37 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Workspace path does not exist' });
     }
 
-    // Interactive mode: create session and start PTY
-    if (interactive) {
-      // Git branch setup
-      const branchName = generateBranchName(prompt);
-      const isRepo = await isGitRepo(workspace.path);
-      
-      if (isRepo) {
-        try {
-          await checkoutMainAndPull(workspace.path);
-          await createAndCheckoutBranch(workspace.path, branchName);
-        } catch (error) {
-          console.error('Git branch setup failed:', error);
-        }
+    // Git branch setup
+    const branchName = generateBranchName(prompt);
+    const isRepo = await isGitRepo(workspace.path);
+
+    if (isRepo) {
+      try {
+        await checkoutMainAndPull(workspace.path);
+        await createAndCheckoutBranch(workspace.path, branchName);
+      } catch (error) {
+        console.error('Git branch setup failed:', error);
       }
-
-      // Generate a CLI session UUID for Claude only (Copilot generates its own)
-      const selectedAgent = agent || 'claude';
-      const cliSessionId = selectedAgent === 'claude' ? uuidv4() : undefined;
-
-      // Create session record
-      const session = await createSessionStore(workspaceId, prompt, branchName, {
-        agent: selectedAgent,
-        validationPrompt,
-        outputPrompt,
-        model,
-        validationModel,
-        outputModel,
-        enabledMcps,
-        interactive: true,
-        copilotSessionId: cliSessionId,
-      });
-
-      // Start PTY session
-      const ptySession = startInteractiveSession(session, prompt, false);
-      if (!ptySession) {
-        return reply.status(500).send({ error: 'Failed to start interactive session' });
-      }
-
-      return { sessionId: session.id, interactive: true };
     }
 
-    // Non-interactive mode: existing behavior
-    // Check if a run is already in progress
-    if (getCurrentRunId()) {
-      return reply.status(409).send({ error: 'A run is already in progress' });
+    // Generate a CLI session UUID for Claude only (Copilot generates its own)
+    const selectedAgent = agent || 'claude';
+    const cliSessionId = selectedAgent === 'claude' ? uuidv4() : undefined;
+
+    // Create session record
+    const session = await createSessionStore(workspaceId, prompt, branchName, {
+      agent: selectedAgent,
+      interactive: true,
+      copilotSessionId: cliSessionId,
+    });
+
+    // Start PTY session
+    const ptySession = startInteractiveSession(session, prompt, false);
+    if (!ptySession) {
+      return reply.status(500).send({ error: 'Failed to start interactive session' });
     }
 
-    // Start new session with first run
-    const { session, run } = await startNewSession(
-      workspaceId,
-      prompt,
-      { agent, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
-      broadcast
-    );
-
-    return { sessionId: session.id, runId: run.id };
-  });
-
-  // Add a new run to existing session
-  app.post<{ Params: { id: string }; Body: StartRunRequest }>('/api/sessions/:id/runs', async (request, reply) => {
-    const sessionId = request.params.id;
-    const { prompt, validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps } = request.body;
-
-    const session = await getSession(sessionId);
-    if (!session) {
-      return reply.status(404).send({ error: 'Session not found' });
-    }
-
-    // Check if a run is already in progress
-    if (getCurrentRunId()) {
-      return reply.status(409).send({ error: 'A run is already in progress' });
-    }
-
-    // Continue session with new run
-    const run = await continueSession(
-      sessionId,
-      prompt,
-      { validationPrompt, outputPrompt, model, validationModel, outputModel, enabledMcps },
-      broadcast
-    );
-
-    return { runId: run.id };
+    return { sessionId: session.id, interactive: true };
   });
 
   // ==================== INTERACTIVE SESSIONS (PTY) ====================
@@ -270,23 +213,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { run };
   });
 
-  // Abort current run
-  app.post('/api/run/abort', async () => {
-    const aborted = abortCurrentRun();
-    return { aborted };
-  });
-
-  // Get current run status
-  app.get('/api/run/current', async () => {
-    const runId = getCurrentRunId();
-    const sessionId = getCurrentSessionId();
-    if (!runId) {
-      return { run: null, session: null };
-    }
-    const run = await getRun(runId);
-    const session = sessionId ? await getSession(sessionId) : null;
-    return { run, session };
-  });
 
   // ==================== GIT ====================
   
@@ -408,18 +334,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
   // Add a local workspace (optionally create folder and init git)
   app.post('/api/workspaces', async (request, reply) => {
-    const { 
-      name, path, validationPrompt, outputPrompt, 
-      defaultModel, validationModel, outputModel,
+    const {
+      name, path,
       createFolder, initGit
     } = request.body as {
       name: string;
       path: string;
-      validationPrompt?: string;
-      outputPrompt?: string;
-      defaultModel?: string;
-      validationModel?: string;
-      outputModel?: string;
       createFolder?: boolean;
       initGit?: boolean;
     };
@@ -439,12 +359,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       // Auto-create directory if it doesn't exist
       try {
         await mkdir(path, { recursive: true });
-        
+
         // Initialize git repository in newly created folder
         await initGitRepo(path);
       } catch (error) {
-        return reply.status(500).send({ 
-          error: `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}` 
+        return reply.status(500).send({
+          error: `Failed to create folder: ${error instanceof Error ? error.message : 'Unknown error'}`
         });
       }
     } else if (createFolder) {
@@ -464,11 +384,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       id: uuidv4(),
       name,
       path,
-      validationPrompt,
-      outputPrompt,
-      defaultModel,
-      validationModel,
-      outputModel,
     };
     await addWorkspace(workspace);
 
@@ -480,41 +395,36 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   
   // Clone a new workspace
   app.post<{ Body: CloneWorkspaceRequest }>('/api/workspaces/clone', async (request, reply) => {
-    const { gitUrl, name, targetPath, validationPrompt, outputPrompt, defaultModel, validationModel, outputModel } = request.body;
-    
+    const { gitUrl, name, targetPath } = request.body;
+
     if (!gitUrl || !name) {
       return reply.status(400).send({ error: 'gitUrl and name are required' });
     }
-    
+
     // Default target path
     const basePath = targetPath || join(process.env.HOME || '/tmp', 'remote-agent-workspaces');
     const workspacePath = join(basePath, name.toLowerCase().replace(/\s+/g, '-'));
-    
+
     if (existsSync(workspacePath)) {
       return reply.status(400).send({ error: 'Workspace path already exists' });
     }
-    
+
     try {
       await cloneRepo(gitUrl, workspacePath);
-      
+
       // Add to config
       const workspace = {
         id: uuidv4(),
         name,
         path: workspacePath,
         gitRepo: gitUrl,
-        validationPrompt,
-        outputPrompt,
-        defaultModel,
-        validationModel,
-        outputModel,
       };
       await addWorkspace(workspace);
-      
+
       return { workspace, isGitRepo: true };
     } catch (error) {
-      return reply.status(500).send({ 
-        error: `Failed to clone repository: ${error instanceof Error ? error.message : 'Unknown error'}` 
+      return reply.status(500).send({
+        error: `Failed to clone repository: ${error instanceof Error ? error.message : 'Unknown error'}`
       });
     }
   });
