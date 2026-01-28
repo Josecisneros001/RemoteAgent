@@ -4,20 +4,23 @@
     "claude.ai",
     "statsig.anthropic.com",
     "sentry.io",
-
     "github.com",
     "api.github.com",
+    "global.rel.tunnels.api.visualstudio.com",
+    "*.rel.tunnels.api.visualstudio.com",
+    "devtunnels.ms",
+    "*.devtunnels.ms",
+    "tunnel.dev",
+    "*.tunnel.dev",
+    "login.microsoftonline.com",
     "githubusercontent.com",
     "github.githubassets.com",
     "api.githubcopilot.com",
-
     "registry.npmjs.org",
     "npmjs.org",
     "npmjs.com",
-
     "pypi.org",
     "files.pythonhosted.org",
-
     "google.com",
     "bing.com",
     "duckduckgo.com",

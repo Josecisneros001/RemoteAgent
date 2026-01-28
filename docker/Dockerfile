@@ -34,6 +34,9 @@ RUN apt-get update && apt-get install -y \
 # Install Claude CLI and GitHub Copilot CLI globally
 RUN npm install -g @anthropic-ai/claude-code @github/copilot
 
+# Install Microsoft Dev Tunnels CLI
+RUN curl -sL https://aka.ms/DevTunnelCliInstall | bash
+
 # Create app directory
 WORKDIR /app
 

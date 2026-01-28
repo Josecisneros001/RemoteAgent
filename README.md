@@ -1,183 +1,161 @@
-# Remote Agent
+<h1 align="center">RemoteAgent</h1>
 
-A mobile-friendly web control panel for GitHub Copilot CLI. Run prompts, validate changes, and generate output images—all from your phone.
+<p align="center">
+  <strong>Run AI coding agents from everywhere</strong>
+</p>
+
+<p align="center">
+  <em>A mobile-friendly web control panel for Claude Code and GitHub Copilot CLI</em>
+</p>
+
+<p align="center">
+  <img src="docs/session_manager.png" width="240" alt="RemoteAgent Session Manager" />
+  &nbsp;&nbsp;
+  <img src="docs/claude_mobile.png" width="240" alt="Claude on Mobile" />
+  &nbsp;&nbsp;
+  <img src="docs/copilot_mobile.png" width="240" alt="Copilot on Mobile" />
+</p>
+
+<p align="center">
+  <a href="#-features">Features</a> |
+  <a href="#-quick-start">Quick Start</a> |
+  <a href="#-docker-deployment">Docker</a> |
+  <a href="#-remote-access">Remote Access</a> |
+  <a href="#-configuration">Configuration</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Claude_Code-CLI-orange?style=for-the-badge" alt="Claude Code" />
+  <img src="https://img.shields.io/badge/GitHub_Copilot-CLI-blue?style=for-the-badge" alt="Copilot CLI" />
+  <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT License" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen" alt="Node.js" />
+  <img src="https://img.shields.io/badge/TypeScript-5.6-blue" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/React-19-61dafb" alt="React" />
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white" alt="Docker" />
+</p>
+
+---
+
+**RemoteAgent** gives you a full interactive terminal to your AI coding agents from anywhere. Start a coding session on your desktop, continue it from your phone while grabbing coffee, and get push notifications when the agent needs your input.
 
 ## Features
 
-- **Three-phase orchestration**: User prompt → Validation → Output generation
-- **Real-time streaming logs**: WebSocket streaming of copilot output for all phases
-- **Session continuation**: Continue previous copilot sessions or start fresh
-- **Retry logic**: Automatic retries (3 attempts) for failed phases
-- **Startup recovery**: Automatically resumes incomplete runs on server restart
-- **Push notifications**: Get alerts when runs complete (or fail)
-- **Run history**: View past runs and their results
-- **Image gallery**: View generated images directly in the UI with lightbox
-- **Mobile-first PWA**: Installable app designed for phone access via tunnel
-- **Multi-workspace support**: Switch between different project workspaces
-
-## Prerequisites
-
-Before running Remote Agent, you need to install and authenticate with both GitHub Copilot CLI and Microsoft Dev Tunnels.
-
-### 1. Install GitHub Copilot CLI
-
-```bash
-# Install via npm (requires Node.js 18+)
-npm install -g @githubnext/github-copilot-cli
-
-# Or via GitHub CLI extension
-gh extension install github/gh-copilot
-```
-
-### 2. Login to GitHub Copilot
-
-```bash
-# Authenticate with GitHub
-gh auth login
-
-# Verify copilot is working
-copilot "say hello"
-```
-
-> **Note**: You need an active GitHub Copilot subscription.
-
-### 3. Install Microsoft Dev Tunnels CLI
-
-```bash
-# Linux/macOS
-curl -sL https://aka.ms/DevTunnelCliInstall | bash
-
-# Or via npm
-npm install -g @devtunnels/cli
-```
-
-### 4. Login to Dev Tunnels
-
-```bash
-# Login with your GitHub account
-devtunnel user login -g
-
-# Verify login
-devtunnel user show
-```
+| Feature | Description |
+|---------|-------------|
+| **Interactive Terminal** | Full PTY terminal in your browser - type commands, respond to prompts, see real-time output |
+| **Mobile-First PWA** | Designed for laptop, phones and tablets |
+| **Session Persistence** | Stop and resume conversations anytime |
+| **Push Notifications** | Get notified when the agent needs input or finishes |
+| **Docker Sandboxing** | Network-filtered container with domain allowlisting |
+| **Multi-Agent** | Seamlessly switch between Claude Code / GitHub Copilot sessions |
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# Clone and install
+git clone https://github.com/josecisneros001/RemoteAgent.git
+cd RemoteAgent
+npm install && cd src/client && npm install && cd ../..
 
-# Create config directory and edit config
+# Configure (add your project paths)
 mkdir -p ~/.remote-agent
 cp config.example.json ~/.remote-agent/config.json
-# Edit ~/.remote-agent/config.json to add your workspaces
 
-# Start the server
+# Run
 npm run dev
+```
 
-# In another terminal, start the tunnel
+Open **http://localhost:3000** - Select workspace - Choose agent - Start coding!
+
+## Docker Deployment
+
+For **secure sandboxed execution** with network filtering:
+
+```bash
+cd docker
+
+# Edit docker-compose.yml to set your workspace path
+# Change: ~/your/projects/folder:/workspace
+
+# Build and run (matches your host user for file permissions)
+HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build
+```
+
+### Network Security
+
+Docker mode provides DNS-based network filtering:
+
+- **Allowlisted domains only** - agents can only reach approved APIs
+- **Blocks SSH/FTP/SMTP** - prevents data exfiltration
+- **Hot-reload allowlist** - edit docker/allowlist.json without restart (requires admin/sudo)
+
+```bash
+# Make allowlist editable only by admin (prevents AI from modifying it)
+sudo chown root:root docker/allowlist.json
+sudo chmod 644 docker/allowlist.json
+```
+
+## Remote Access
+
+Access RemoteAgent from your phone or any device:
+
+### Microsoft Dev Tunnels (Recommended)
+
+Dev Tunnels provides **built-in authentication** — only you can access the tunnel using your Microsoft/GitHub account. No random URLs that anyone could stumble upon.
+
+```bash
+# Install Dev Tunnels CLI
+curl -sL https://aka.ms/DevTunnelCliInstall | bash
+
+# Login (uses your GitHub or Microsoft account)
+devtunnel user login
+
+# Start tunnel (use the included script)
 npm run tunnel
 ```
 
+The tunnel URL stays the same across restarts, and requires your account to access.
+
+### Other Options
+Cloudflare Tunnel / ngrok
+
+
 ## Configuration
 
-Edit `~/.remote-agent/config.json`:
+Config file: ~/.remote-agent/config.json
 
 ```json
 {
-  "workspaces": [
-    {
-      "id": "my-app",
-      "name": "My Application",
-      "path": "/home/user/projects/my-app",
-      "validationPrompt": "Verify the changes are correct. Run any relevant tests.",
-      "outputPrompt": "Generate images in ./outputs/. Create the directory if needed."
-    }
-  ],
-  "mcps": [],
-  "model": "claude-sonnet-4",
+  "workspaces": [],
+  "defaultBrowsePath": "/home/user/projects",
   "port": 3000
 }
 ```
 
-### Config Options
-
 | Option | Description |
 |--------|-------------|
-| `workspaces` | Array of workspaces you can access from phone |
-| `workspaces[].validationPrompt` | Per-workspace template for validation phase |
-| `workspaces[].outputPrompt` | Per-workspace template for output/image generation phase |
-| `mcps` | Additional MCP servers to use (e.g., `["playwright"]`) |
-| `model` | AI model to use (e.g., `claude-sonnet-4`, `gpt-5`) |
-| `port` | Server port (default: 3000) |
+| defaultBrowsePath | Default folder when adding new workspaces |
+| port | Server port (default: 3000) |
 
-### Push Notifications (VAPID Keys)
+## Prerequisites
 
-VAPID keys are required for push notifications. They are **automatically generated** on first server startup and saved to your config file:
+**Required:**
+- Node.js 18+
+- One of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli)
 
-```json
-{
-  "vapidPublicKey": "...",
-  "vapidPrivateKey": "...",
-  "vapidEmail": "mailto:admin@localhost"
-}
+**Install Claude Code:**
+```bash
+npm install -g @anthropic-ai/claude-code
+claude auth
 ```
 
-If you need to regenerate them manually, delete these fields from your config and restart the server, or generate new keys:
-
+**Install GitHub Copilot CLI:**
 ```bash
-npx web-push generate-vapid-keys
-```
-
-Then add the keys to `~/.remote-agent/config.json`.
-
-## How It Works
-
-1. **Select workspace** from the dropdown (populated from config)
-2. **Optionally select a previous session** to continue
-3. **Enter your prompt** (what you want copilot to do)
-4. **Add validation instructions** (optional) - how to verify the changes
-5. **Add image instructions** (optional) - what images to generate
-6. **Submit** and watch the live streaming logs
-
-The orchestrator runs three copilot commands in sequence:
-1. `copilot -p "<your prompt>" --allow-all-tools`
-2. `copilot -p "<validation prompt>" --allow-all-tools` (isolated session)
-3. `copilot -p "<output prompt>" --allow-all-tools` (isolated session)
-
-Each phase has automatic retry logic (3 attempts with 2-second delays).
-
-Images written to `./outputs/` in the workspace are automatically detected and shown in the UI.
-
-## UI Sections
-
-When viewing a run, you'll see four collapsible sections:
-
-1. **Prompt Output** - Streaming logs from the main prompt phase
-2. **Validation** - Validation status (passed/failed) and logs
-3. **Image Generation Logs** - Streaming logs from the output generation phase
-4. **Generated Images** - Gallery of images created in `./outputs/`
-
-## Tunnel Setup
-
-The tunnel uses Microsoft Dev Tunnels (same service VS Code uses):
-
-```bash
-# Start tunnel (run alongside the server)
-npm run tunnel
-```
-
-This gives you a public `https://*.devtunnels.ms` URL accessible from your phone.
-
-## Development
-
-```bash
-# Run with auto-reload
-npm run dev
-
-# Build for production
-npm run build
-npm start
+npm install -g @github/copilot
+copilot login
 ```
 
 ## Project Structure
@@ -185,39 +163,59 @@ npm start
 ```
 RemoteAgent/
 ├── src/
-│   ├── server/
-│   │   ├── index.ts          # Fastify server entry
-│   │   ├── types.ts          # TypeScript types
-│   │   ├── routes/
-│   │   │   └── api.ts        # REST API endpoints
-│   │   └── services/
-│   │       ├── config.ts     # Config loading
-│   │       ├── run-store.ts  # Run persistence
-│   │       ├── orchestrator.ts # Three-phase execution
-│   │       ├── image-watcher.ts # File watcher
-│   │       ├── push.ts       # Push notifications
-│   │       └── websocket.ts  # WS client management
-│   └── client/
-│       ├── index.html        # Main HTML
-│       ├── styles/main.css   # Mobile-first styles
-│       ├── js/app.js         # Client app
-│       ├── sw.js             # Service worker
-│       └── manifest.json     # PWA manifest
-├── scripts/
-│   └── tunnel.sh             # Dev tunnel script
-├── package.json
-└── tsconfig.json
+│   ├── server/              # Fastify + WebSocket backend
+│   │   ├── services/
+│   │   │   ├── pty-manager.ts   # Interactive terminal (node-pty)
+│   │   │   ├── git.ts           # Branch/commit management
+│   │   │   └── push.ts          # Push notifications
+│   │   └── routes/api.ts        # REST endpoints
+│   └── client/              # React 19 + Vite frontend
+│       └── src/components/
+│           ├── InteractiveTerminal/  # xterm.js terminal
+│           ├── SessionList/
+│           └── NewSessionForm/
+├── docker/                  # Docker + network filtering
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── allowlist.json       # Allowed domains
+│   └── entrypoint.sh        # dnsmasq + iptables setup
+└── package.json
 ```
 
-## Data Storage
+## Development
 
-All data is stored in `~/.remote-agent/`:
+```bash
+# Development with hot reload
+npm run dev
 
+# Watch both server and client
+npm run watch
+
+# Production build
+npm run build && npm start
 ```
-~/.remote-agent/
-├── config.json           # Your configuration
-├── runs/                 # Run history (JSON files)
-│   ├── <run-id>.json
-│   └── ...
-└── push-subscriptions.json  # Push notification subscriptions
-```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+1. Fork the repository
+2. Create your feature branch (git checkout -b feature/amazing-feature)
+3. Commit your changes (git commit -m 'Add amazing feature')
+4. Push to the branch (git push origin feature/amazing-feature)
+5. Open a Pull Request
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+---
+
+<p align="center">
+  <strong>Built for developers who code on the go</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/josecisneros001/RemoteAgent/issues">Report Bug</a> |
+  <a href="https://github.com/josecisneros001/RemoteAgent/issues">Request Feature</a>
+</p>

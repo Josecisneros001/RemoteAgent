@@ -1,12 +1,5 @@
 {
-  "workspaces": [
-    {
-      "id": "example",
-      "name": "Example Project",
-      "path": "/path/to/your/project"
-    }
-  ],
-  "mcps": [],
-  "defaultBrowsePath": "/home/user/projects",
+  "workspaces": [],
+  "defaultBrowsePath": "~/",
   "port": 3000
 }
