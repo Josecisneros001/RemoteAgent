@@ -15,7 +15,23 @@ AGENT_GID=$(id -g $AGENT_USER)
 echo "Running as user: $AGENT_USER (UID=$AGENT_UID, GID=$AGENT_GID)"
 
 # Create home directories if they don't exist
-mkdir -p /home/$AGENT_USER/.claude /home/$AGENT_USER/.copilot /home/$AGENT_USER/.remote-agent /home/$AGENT_USER/.config
+mkdir -p /home/$AGENT_USER/.claude /home/$AGENT_USER/.copilot /home/$AGENT_USER/.remote-agent/sessions /home/$AGENT_USER/.remote-agent/runs /home/$AGENT_USER/.config
+
+# Copy and modify Claude settings.json for Docker environment
+# Replace localhost with host.docker.internal so container can reach host services
+if [ -f "/tmp/claude-settings.json" ]; then
+    echo "Copying Claude settings.json (localhost -> host.docker.internal)..."
+    sed 's/localhost/host.docker.internal/g' /tmp/claude-settings.json > /home/$AGENT_USER/.claude/settings.json
+fi
+
+# Ensure proper ownership of home directory and all subdirectories
+# This is important for mounted volumes that may have root ownership
+chown -R $AGENT_USER:$AGENT_USER /home/$AGENT_USER 2>/dev/null || true
+
+# Fix workspace permissions (important for Windows hosts where UID/GID don't match)
+if [ -d "/workspace" ]; then
+    chown -R $AGENT_USER:$AGENT_USER /workspace 2>/dev/null || true
+fi
 
 # Check if network filtering is enabled
 ENABLE_NETWORK_FILTER=${ENABLE_NETWORK_FILTER:-true}
@@ -89,14 +105,23 @@ EOF
 
     # Allow any port to host.docker.internal (for local development APIs)
     # Use the IP from /etc/hosts (set by docker-compose extra_hosts) or fallback to gateway
-    HOST_INTERNAL_IP=$(getent hosts host.docker.internal 2>/dev/null | awk '{print $1}')
-    if [ -z "$HOST_INTERNAL_IP" ]; then
-        HOST_INTERNAL_IP=$(ip route | grep default | awk '{print $3}')
+    # Handle both IPv4 and IPv6 addresses
+    HOST_INTERNAL_IPS=$(getent ahosts host.docker.internal 2>/dev/null | awk '{print $1}' | sort -u)
+    if [ -z "$HOST_INTERNAL_IPS" ]; then
+        HOST_INTERNAL_IPS=$(ip route | grep default | awk '{print $3}')
     fi
-    if [ -n "$HOST_INTERNAL_IP" ]; then
-        iptables -A OUTPUT -p tcp -d $HOST_INTERNAL_IP -m owner --uid-owner $AGENT_UID -j ACCEPT
-        echo "  [+] Host machine ($HOST_INTERNAL_IP): all ports allowed"
-    fi
+    for HOST_INTERNAL_IP in $HOST_INTERNAL_IPS; do
+        # Check if it's an IPv6 address (contains colon)
+        if echo "$HOST_INTERNAL_IP" | grep -q ':'; then
+            # Use ip6tables for IPv6 addresses
+            ip6tables -A OUTPUT -p tcp -d "$HOST_INTERNAL_IP" -m owner --uid-owner $AGENT_UID -j ACCEPT 2>/dev/null || true
+            echo "  [+] Host machine IPv6 ($HOST_INTERNAL_IP): all ports allowed"
+        else
+            # Use iptables for IPv4 addresses
+            iptables -A OUTPUT -p tcp -d "$HOST_INTERNAL_IP" -m owner --uid-owner $AGENT_UID -j ACCEPT
+            echo "  [+] Host machine IPv4 ($HOST_INTERNAL_IP): all ports allowed"
+        fi
+    done
 
     # Block all other outbound from agent user
     iptables -A OUTPUT -m owner --uid-owner $AGENT_UID -j DROP

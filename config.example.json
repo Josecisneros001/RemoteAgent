@@ -1,5 +1,5 @@
 {
   "workspaces": [],
-  "defaultBrowsePath": "~/",
+  "defaultBrowsePath": "/workspace",
   "port": 3000
 }

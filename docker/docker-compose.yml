@@ -18,6 +18,8 @@ services:
       # Claude CLI auth and config (for agent user)
       - ~/.claude.json:/home/agent/.claude.json
       - ~/.claude-docker/:/home/agent/.claude/
+      # Mount host's settings.json to staging location (entrypoint copies & modifies for Docker)
+      - ~/.claude/settings.json:/tmp/claude-settings.json:ro
 
       # Copilot CLI auth and config (for agent user)
       - ~/.copilot-docker:/home/agent/.copilot
