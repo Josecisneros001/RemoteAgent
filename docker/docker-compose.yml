@@ -34,6 +34,8 @@ services:
       - WORKSPACE_PATH=/workspace
       # Set to false to disable DNS-based network filtering
       - ENABLE_NETWORK_FILTER=true
+      # Increase Node.js heap size for Claude CLI (prevents OOM on large sessions)
+      - NODE_OPTIONS=--max-old-space-size=8192
     cap_add:
       # Required for iptables firewall rules
       - NET_ADMIN
@@ -44,4 +46,12 @@ services:
       nofile:
         soft: 65536
         hard: 65536
+    deploy:
+      resources:
+        limits:
+          cpus: '16.0'
+          memory: 12800M
+        reservations:
+          cpus: '2.0'
+          memory: 2G
     restart: unless-stopped
