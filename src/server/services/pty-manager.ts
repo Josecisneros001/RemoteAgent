@@ -1,7 +1,7 @@
 import * as pty from 'node-pty';
 import type { IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
-import { readdir } from 'fs/promises';
+import { readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
 import { sendNotification } from './push.js';
@@ -21,10 +21,12 @@ const OUTPUT_MAX_BUFFER_SIZE = 262144; // 256KB max buffer (increased to 4x chun
 const OUTPUT_THROTTLE_MS = 8; // Minimum ms between flushes during heavy load
 
 // ACK-based flow control thresholds
-// CRITICAL: ACK_PAUSE_THRESHOLD must be LESS than OUTPUT_MAX_BUFFER_SIZE
-// so flow control pauses PTY BEFORE buffer truncation occurs
-const ACK_PAUSE_THRESHOLD = 131072;  // 128KB - pause when 2 chunks pending (was 64KB)
-const ACK_RESUME_THRESHOLD = 65536;  // 64KB - resume when 1 chunk pending (was 32KB)
+// CRITICAL: ACK_PAUSE_THRESHOLD + OUTPUT_MAX_CHUNK_SIZE must be <= client's MAX_WRITE_BUFFER_SIZE
+// Server can send one more chunk after pausing, so max in-flight = pause threshold + chunk size
+// With 64KB pause + 64KB chunk = 128KB max in-flight, matching client's 128KB buffer
+const ACK_PAUSE_THRESHOLD = 65536;   // 64KB - pause when 1 chunk pending
+const ACK_RESUME_THRESHOLD = 32768;  // 32KB - resume when half chunk pending
+const PAUSE_TIMEOUT_MS = 30000;  // 30 seconds - force resume if no ACKs (prevents deadlock)
 
 // Copilot session state directory
 const COPILOT_SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
@@ -80,6 +82,7 @@ interface PtySession {
   // ACK-based flow control: track unacknowledged bytes per client
   pendingBytes: Map<WebSocket, number>;
   isPaused: boolean;  // Whether PTY output is paused due to backpressure
+  pauseTimeoutId: NodeJS.Timeout | null;  // Track pause timeout for deadlock prevention
 }
 
 // Active PTY sessions by session ID
@@ -103,6 +106,18 @@ export async function startInteractiveSession(
   const workingDir = session.workspacePath;
   if (!workingDir) {
     console.error(`[PTY] No workspace path for session: ${session.id}`);
+    return null;
+  }
+
+  // Verify directory exists before spawning PTY
+  try {
+    const dirStat = await stat(workingDir);
+    if (!dirStat.isDirectory()) {
+      console.error(`[PTY] Workspace path is not a directory: ${workingDir}`);
+      return null;
+    }
+  } catch (e) {
+    console.error(`[PTY] Workspace directory does not exist: ${workingDir}`, e);
     return null;
   }
 
@@ -195,6 +210,7 @@ export async function startInteractiveSession(
       // ACK-based flow control
       pendingBytes: new Map(),
       isPaused: false,
+      pauseTimeoutId: null,
     };
 
     // Handle PTY output
@@ -519,6 +535,19 @@ function checkAndPausePty(ptySession: PtySession): void {
     ptySession.isPaused = true;
     ptySession.pty.pause();
     console.log(`[PTY] Session ${ptySession.sessionId} paused (${maxPending} bytes pending)`);
+
+    // Set timeout to force-resume if no ACKs arrive (prevents deadlock)
+    if (ptySession.pauseTimeoutId) {
+      clearTimeout(ptySession.pauseTimeoutId);
+    }
+    ptySession.pauseTimeoutId = setTimeout(() => {
+      if (ptySession.isPaused) {
+        console.warn(`[PTY] Force-resuming session ${ptySession.sessionId} after ${PAUSE_TIMEOUT_MS}ms pause timeout`);
+        ptySession.isPaused = false;
+        ptySession.pty.resume();
+        ptySession.pauseTimeoutId = null;
+      }
+    }, PAUSE_TIMEOUT_MS);
   }
 }
 
@@ -527,6 +556,12 @@ function checkAndPausePty(ptySession: PtySession): void {
  */
 function checkAndResumePty(ptySession: PtySession): void {
   if (!ptySession.isPaused) return;
+
+  // Clear pause timeout on successful resume
+  if (ptySession.pauseTimeoutId) {
+    clearTimeout(ptySession.pauseTimeoutId);
+    ptySession.pauseTimeoutId = null;
+  }
 
   // Find the maximum pending bytes across all clients
   let maxPending = 0;
@@ -702,6 +737,10 @@ function cleanupSession(sessionId: string): void {
     }
     if (ptySession.outputFlushTimer) {
       clearTimeout(ptySession.outputFlushTimer);
+    }
+    if (ptySession.pauseTimeoutId) {
+      clearTimeout(ptySession.pauseTimeoutId);
+      ptySession.pauseTimeoutId = null;
     }
     // Clear buffers to free memory
     ptySession.outputBufferChunks = [];

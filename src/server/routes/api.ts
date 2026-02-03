@@ -3,7 +3,7 @@ import { readFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
-import { listSessions, getSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
+import { listSessions, getSession, saveSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
@@ -136,13 +136,29 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       try {
         const existingWorktree = await getWorktreePath(session.originalRepoPath, session.branchName);
         if (!existingWorktree) {
-          // Recreate the worktree if it was removed
-          const worktreePath = await createWorktree(session.originalRepoPath, session.branchName);
-          console.log(`[Git] Recreated worktree at ${worktreePath} for session ${sessionId}`);
+          try {
+            // Recreate the worktree if it was removed
+            const worktreePath = await createWorktree(session.originalRepoPath, session.branchName);
+            console.log(`[Git] Recreated worktree at ${worktreePath} for session ${sessionId}`);
+            // Update session with new worktree path if it changed
+            if (worktreePath !== session.workspacePath) {
+              session.workspacePath = worktreePath;
+              await saveSession(session);
+            }
+          } catch (createError) {
+            console.error(`[Git] Failed to create worktree for session ${sessionId}:`, createError);
+            return reply.status(500).send({
+              error: 'Failed to prepare workspace',
+              details: createError instanceof Error ? createError.message : 'Unknown error'
+            });
+          }
         }
       } catch (error) {
-        console.error(`[Git] Failed to ensure worktree exists for session ${sessionId}:`, error);
-        // Continue anyway - PTY will run in whatever directory exists
+        console.error(`[Git] Failed to check worktree for session ${sessionId}:`, error);
+        return reply.status(500).send({
+          error: 'Failed to check workspace',
+          details: error instanceof Error ? error.message : 'Unknown error'
+        });
       }
     }
 
