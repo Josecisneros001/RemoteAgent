@@ -24,7 +24,8 @@ export interface Session {
   agent: AgentType;              // Which CLI agent owns this session
   copilotSessionId?: string;     // CLI session ID (works for both agents)
   workspaceId: string;
-  workspacePath: string;
+  workspacePath: string;         // Working directory (worktree path if using worktrees)
+  originalRepoPath?: string;     // Original git repo path (if using worktrees)
   friendlyName: string;          // First ~50 chars of initial prompt
   branchName: string;            // Git branch for this session
   createdAt: string;
@@ -198,7 +199,13 @@ export interface WsPtyExitEvent {
   exitCode: number;
 }
 
-export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent;
+export interface WsPtyAckEvent {
+  type: 'pty-ack';
+  sessionId: string;
+  bytes: number;  // Number of bytes acknowledged by client
+}
+
+export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent | WsPtyAckEvent;
 
 // Push subscription
 export interface PushSubscription {

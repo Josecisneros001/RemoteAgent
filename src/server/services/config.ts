@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { pathExists } from '../utils/fs.js';
 import type { Config, WorkspaceConfig } from '../types.js';
 
 const CONFIG_DIR = join(homedir(), '.remote-agent');
@@ -15,17 +15,17 @@ const DEFAULT_CONFIG: Config = {
 let cachedConfig: Config | null = null;
 
 export async function ensureConfigDir(): Promise<void> {
-  if (!existsSync(CONFIG_DIR)) {
+  if (!(await pathExists(CONFIG_DIR))) {
     await mkdir(CONFIG_DIR, { recursive: true });
   }
 
   const sessionsDir = join(CONFIG_DIR, 'sessions');
-  if (!existsSync(sessionsDir)) {
+  if (!(await pathExists(sessionsDir))) {
     await mkdir(sessionsDir, { recursive: true });
   }
 
   const runsDir = join(CONFIG_DIR, 'runs');
-  if (!existsSync(runsDir)) {
+  if (!(await pathExists(runsDir))) {
     await mkdir(runsDir, { recursive: true });
   }
 }
@@ -33,7 +33,7 @@ export async function ensureConfigDir(): Promise<void> {
 export async function loadConfig(): Promise<Config> {
   await ensureConfigDir();
 
-  if (!existsSync(CONFIG_PATH)) {
+  if (!(await pathExists(CONFIG_PATH))) {
     // Create default config
     await writeFile(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2));
     console.log(`Created default config at ${CONFIG_PATH}`);

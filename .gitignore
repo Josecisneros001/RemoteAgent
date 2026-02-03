@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 
+# Git worktrees (used by RemoteAgent for session isolation)
+.worktrees/
+
 # Logs
 *.log
 npm-debug.log*

@@ -1,10 +1,9 @@
 import * as pty from 'node-pty';
 import type { IPty } from 'node-pty';
 import type { WebSocket } from 'ws';
-import { readdirSync } from 'fs';
+import { readdir } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getConfig } from './config.js';
 import { sendNotification } from './push.js';
 import { updateSessionCopilotId } from './run-store.js';
 import type { Session, WsPtyDataEvent, WsInteractionNeededEvent, WsPtyExitEvent } from '../types.js';
@@ -17,9 +16,15 @@ const IDLE_THRESHOLD_MS = 8000;
 
 // Output batching and throttling to prevent overwhelming browser during large history dumps
 const OUTPUT_BATCH_INTERVAL_MS = 16; // ~60fps
-const OUTPUT_MAX_CHUNK_SIZE = 16384; // 16KB max per WebSocket message
-const OUTPUT_MAX_BUFFER_SIZE = 65536; // 64KB max buffer before dropping old data
+const OUTPUT_MAX_CHUNK_SIZE = 65536; // 64KB max per WebSocket message (was 16KB - matches client buffer better)
+const OUTPUT_MAX_BUFFER_SIZE = 262144; // 256KB max buffer (increased to 4x chunk size)
 const OUTPUT_THROTTLE_MS = 8; // Minimum ms between flushes during heavy load
+
+// ACK-based flow control thresholds
+// CRITICAL: ACK_PAUSE_THRESHOLD must be LESS than OUTPUT_MAX_BUFFER_SIZE
+// so flow control pauses PTY BEFORE buffer truncation occurs
+const ACK_PAUSE_THRESHOLD = 131072;  // 128KB - pause when 2 chunks pending (was 64KB)
+const ACK_RESUME_THRESHOLD = 65536;  // 64KB - resume when 1 chunk pending (was 32KB)
 
 // Copilot session state directory
 const COPILOT_SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
@@ -27,9 +32,9 @@ const COPILOT_SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
 /**
  * Get existing Copilot session IDs from ~/.copilot/session-state/
  */
-function getCopilotSessionIds(): Set<string> {
+async function getCopilotSessionIds(): Promise<Set<string>> {
   try {
-    const entries = readdirSync(COPILOT_SESSION_STATE_DIR, { withFileTypes: true });
+    const entries = await readdir(COPILOT_SESSION_STATE_DIR, { withFileTypes: true });
     return new Set(
       entries
         .filter(e => e.isDirectory())
@@ -43,8 +48,8 @@ function getCopilotSessionIds(): Set<string> {
 /**
  * Detect new Copilot session ID by comparing before/after session directories
  */
-function detectNewCopilotSessionId(beforeIds: Set<string>): string | null {
-  const afterIds = getCopilotSessionIds();
+async function detectNewCopilotSessionId(beforeIds: Set<string>): Promise<string | null> {
+  const afterIds = await getCopilotSessionIds();
   for (const id of afterIds) {
     if (!beforeIds.has(id)) {
       return id;
@@ -61,7 +66,10 @@ interface PtySession {
   idleTimer: NodeJS.Timeout | null;
   isInteractionNotified: boolean;
   // Output batching to reduce WebSocket overhead
-  outputBuffer: string;
+  // Uses array-based buffer to avoid string concatenation GC pressure
+  outputBufferChunks: string[];
+  outputBufferSize: number; // Track total size to avoid repeated length calculations
+  outputChunksSentIndex: number; // Track how many chunks have been sent (avoids string slicing)
   outputFlushTimer: NodeJS.Timeout | null;
   lastFlushTime: number; // For throttling during heavy load
   // Retry detection buffer (limited size, cleared after use)
@@ -69,6 +77,9 @@ interface PtySession {
   retryDetectionComplete: boolean;
   // Flag to indicate PTY is being restarted (don't notify clients of exit)
   isRestarting: boolean;
+  // ACK-based flow control: track unacknowledged bytes per client
+  pendingBytes: Map<WebSocket, number>;
+  isPaused: boolean;  // Whether PTY output is paused due to backpressure
 }
 
 // Active PTY sessions by session ID
@@ -77,21 +88,21 @@ const ptySessions = new Map<string, PtySession>();
 /**
  * Start an interactive PTY session for a Claude/Copilot CLI
  */
-export function startInteractiveSession(
+export async function startInteractiveSession(
   session: Session,
   prompt?: string,
   resume?: boolean
-): PtySession | null {
+): Promise<PtySession | null> {
   // Check if session already exists
   if (ptySessions.has(session.id)) {
     console.log(`[PTY] Session ${session.id} already active`);
     return ptySessions.get(session.id)!;
   }
 
-  const config = getConfig();
-  const workspace = config.workspaces.find(w => w.id === session.workspaceId);
-  if (!workspace) {
-    console.error(`[PTY] Workspace not found: ${session.workspaceId}`);
+  // Use the session's workspacePath which may be a worktree path
+  const workingDir = session.workspacePath;
+  if (!workingDir) {
+    console.error(`[PTY] No workspace path for session: ${session.id}`);
     return null;
   }
 
@@ -145,12 +156,12 @@ export function startInteractiveSession(
       args.push('--resume', session.copilotSessionId);
     } else if (!resume && !session.copilotSessionId) {
       // First start for Copilot - capture existing session IDs to detect the new one
-      copilotSessionIdsBefore = getCopilotSessionIds();
+      copilotSessionIdsBefore = await getCopilotSessionIds();
       console.log(`[PTY] Copilot first start - capturing ${copilotSessionIdsBefore.size} existing session IDs`);
     }
   }
 
-  console.log(`[PTY] Starting ${session.agent} session in ${workspace.path}`);
+  console.log(`[PTY] Starting ${session.agent} session in ${workingDir}`);
   console.log(`[PTY] Command: ${command} ${args.join(' ')}`);
   console.log(`[PTY] Session copilotSessionId: ${session.copilotSessionId}`);
 
@@ -159,7 +170,7 @@ export function startInteractiveSession(
       name: 'xterm-256color',
       cols: 120,
       rows: 40,
-      cwd: workspace.path,
+      cwd: workingDir,
       env: envVars,
     });
 
@@ -170,8 +181,10 @@ export function startInteractiveSession(
       lastOutputTime: Date.now(),
       idleTimer: null,
       isInteractionNotified: false,
-      // Output batching
-      outputBuffer: '',
+      // Output batching - array-based to avoid string concatenation GC pressure
+      outputBufferChunks: [],
+      outputBufferSize: 0,
+      outputChunksSentIndex: 0,
       outputFlushTimer: null,
       lastFlushTime: 0,
       // Retry detection (limited, cleared after use)
@@ -179,6 +192,9 @@ export function startInteractiveSession(
       retryDetectionComplete: false,
       // Restart flag
       isRestarting: false,
+      // ACK-based flow control
+      pendingBytes: new Map(),
+      isPaused: false,
     };
 
     // Handle PTY output
@@ -216,13 +232,29 @@ export function startInteractiveSession(
       }
 
       // Batch output for WebSocket to reduce overhead
-      ptySession.outputBuffer += data;
+      // Push to array instead of string concatenation to avoid GC pressure
+      ptySession.outputBufferChunks.push(data);
+      ptySession.outputBufferSize += data.length;
 
       // CRITICAL: Enforce buffer limit during accumulation, not just during flush
-      // This prevents memory exhaustion during large history dumps
-      if (ptySession.outputBuffer.length > OUTPUT_MAX_BUFFER_SIZE) {
-        const truncateAmount = ptySession.outputBuffer.length - OUTPUT_MAX_BUFFER_SIZE;
-        ptySession.outputBuffer = ptySession.outputBuffer.slice(truncateAmount);
+      // With proper flow control, this should NEVER trigger during normal operation
+      // If it does trigger, it means ACK_PAUSE_THRESHOLD is misconfigured
+      if (ptySession.outputBufferSize > OUTPUT_MAX_BUFFER_SIZE) {
+        // Drop chunks from the front until we're under the limit
+        let droppedBytes = 0;
+        let droppedChunks = 0;
+        while (ptySession.outputBufferChunks.length > 0 && ptySession.outputBufferSize > OUTPUT_MAX_BUFFER_SIZE) {
+          const dropped = ptySession.outputBufferChunks.shift()!;
+          ptySession.outputBufferSize -= dropped.length;
+          droppedBytes += dropped.length;
+          droppedChunks++;
+        }
+        // Adjust the sent index since we removed chunks from the front
+        ptySession.outputChunksSentIndex = Math.max(0, ptySession.outputChunksSentIndex - droppedChunks);
+        // PROMINENT WARNING: This should not happen with proper flow control
+        console.warn(`[PTY] ⚠️ DATA LOSS: Dropped ${droppedBytes} bytes from buffer! ` +
+          `Buffer was ${ptySession.outputBufferSize + droppedBytes} bytes, max is ${OUTPUT_MAX_BUFFER_SIZE}. ` +
+          `This indicates ACK_PAUSE_THRESHOLD (${ACK_PAUSE_THRESHOLD}) may be too high.`);
       }
 
       // Schedule flush if not already scheduled
@@ -265,8 +297,8 @@ export function startInteractiveSession(
         ptySessions.delete(session.id);
 
         // Restart with --session-id instead of --resume
-        setTimeout(() => {
-          const newPtySession = startInteractiveSession(session, prompt, false);
+        setTimeout(async () => {
+          const newPtySession = await startInteractiveSession(session, prompt, false);
           if (newPtySession) {
             // Re-attach existing clients to the new session
             for (const client of existingClients) {
@@ -281,7 +313,7 @@ export function startInteractiveSession(
       }
 
       // Flush any remaining buffered output before sending exit
-      if (ptySession.outputBuffer) {
+      if (ptySession.outputBufferSize > 0) {
         flushOutputBuffer(ptySession, session.id);
       }
 
@@ -310,8 +342,8 @@ export function startInteractiveSession(
       console.log(`[PTY] Will detect Copilot session ID. Before IDs count: ${copilotSessionIdsBefore.size}`);
 
       const detectWithRetry = async (attempt: number, maxAttempts: number) => {
-        const newSessionId = detectNewCopilotSessionId(copilotSessionIdsBefore!);
-        const afterIds = getCopilotSessionIds();
+        const newSessionId = await detectNewCopilotSessionId(copilotSessionIdsBefore!);
+        const afterIds = await getCopilotSessionIds();
         console.log(`[PTY] Detection attempt ${attempt}/${maxAttempts}: After IDs count: ${afterIds.size}, new session ID: ${newSessionId}`);
 
         if (newSessionId) {
@@ -363,7 +395,11 @@ export function detachClient(sessionId: string, ws: WebSocket): void {
   const ptySession = ptySessions.get(sessionId);
   if (ptySession) {
     ptySession.clients.delete(ws);
+    ptySession.pendingBytes.delete(ws);  // Clean up ACK tracking
     console.log(`[PTY] Client detached from session ${sessionId}, remaining clients: ${ptySession.clients.size}`);
+
+    // Check if we can resume PTY after client disconnect
+    checkAndResumePty(ptySession);
   }
 }
 
@@ -446,22 +482,98 @@ export function stopAllSessions(): void {
   console.log('[PTY] All sessions stopped');
 }
 
+/**
+ * Handle ACK message from client - acknowledges bytes received
+ * This allows the server to track backpressure and pause/resume PTY output
+ */
+export function handleClientAck(sessionId: string, client: WebSocket, bytes: number): void {
+  const ptySession = ptySessions.get(sessionId);
+  if (!ptySession) return;
+
+  const currentPending = ptySession.pendingBytes.get(client) || 0;
+  const newPending = Math.max(0, currentPending - bytes);
+  ptySession.pendingBytes.set(client, newPending);
+
+  // Check if we can resume PTY (if it was paused)
+  checkAndResumePty(ptySession);
+}
+
 // Internal helpers
+
+/**
+ * Check if PTY should be paused due to backpressure from clients
+ */
+function checkAndPausePty(ptySession: PtySession): void {
+  if (ptySession.isPaused) return;
+
+  // Find the maximum pending bytes across all clients
+  let maxPending = 0;
+  for (const pending of ptySession.pendingBytes.values()) {
+    if (pending > maxPending) {
+      maxPending = pending;
+    }
+  }
+
+  // Pause if any client has too much pending data
+  if (maxPending >= ACK_PAUSE_THRESHOLD) {
+    ptySession.isPaused = true;
+    ptySession.pty.pause();
+    console.log(`[PTY] Session ${ptySession.sessionId} paused (${maxPending} bytes pending)`);
+  }
+}
+
+/**
+ * Check if PTY can be resumed after receiving ACK from clients
+ */
+function checkAndResumePty(ptySession: PtySession): void {
+  if (!ptySession.isPaused) return;
+
+  // Find the maximum pending bytes across all clients
+  let maxPending = 0;
+  for (const pending of ptySession.pendingBytes.values()) {
+    if (pending > maxPending) {
+      maxPending = pending;
+    }
+  }
+
+  // Resume if all clients are below the resume threshold
+  if (maxPending < ACK_RESUME_THRESHOLD) {
+    ptySession.isPaused = false;
+    ptySession.pty.resume();
+    console.log(`[PTY] Session ${ptySession.sessionId} resumed (${maxPending} bytes pending)`);
+  }
+}
 
 /**
  * Flush batched output to WebSocket clients with chunking and throttling.
  * Prevents browser crashes when resuming sessions with large history.
+ *
+ * Optimization: Uses chunk indices to avoid string slicing overhead.
+ * Instead of join() + slice() + slice(), we track which chunks have been
+ * sent and only join the chunks needed for each send.
  */
 function flushOutputBuffer(ptySession: PtySession, sessionId: string): void {
   ptySession.outputFlushTimer = null;
 
-  if (!ptySession.outputBuffer) return;
+  const chunks = ptySession.outputBufferChunks;
+  const startIndex = ptySession.outputChunksSentIndex;
+
+  // Nothing new to send
+  if (startIndex >= chunks.length) {
+    return;
+  }
 
   const now = Date.now();
 
   // Throttle: ensure minimum time between flushes during heavy load
+  // Calculate unsent size for throttling decision
+  let unsentSize = 0;
+  for (let i = startIndex; i < chunks.length; i++) {
+    unsentSize += chunks[i].length;
+  }
+
   const timeSinceLastFlush = now - ptySession.lastFlushTime;
-  if (timeSinceLastFlush < OUTPUT_THROTTLE_MS && ptySession.outputBuffer.length < OUTPUT_MAX_CHUNK_SIZE) {
+  if (timeSinceLastFlush < OUTPUT_THROTTLE_MS && unsentSize < OUTPUT_MAX_CHUNK_SIZE) {
     // Reschedule flush
     ptySession.outputFlushTimer = setTimeout(() => {
       flushOutputBuffer(ptySession, sessionId);
@@ -469,29 +581,29 @@ function flushOutputBuffer(ptySession: PtySession, sessionId: string): void {
     return;
   }
 
-  // If buffer is too large, truncate old data to prevent memory issues
-  if (ptySession.outputBuffer.length > OUTPUT_MAX_BUFFER_SIZE) {
-    const truncateAmount = ptySession.outputBuffer.length - OUTPUT_MAX_BUFFER_SIZE;
-    ptySession.outputBuffer = ptySession.outputBuffer.slice(truncateAmount);
-    console.log(`[PTY] Truncated ${truncateAmount} bytes from buffer to prevent overflow`);
+  // Calculate how many chunks to send (up to OUTPUT_MAX_CHUNK_SIZE bytes)
+  let bytesToSend = 0;
+  let endIndex = startIndex;
+
+  for (let i = startIndex; i < chunks.length && bytesToSend < OUTPUT_MAX_CHUNK_SIZE; i++) {
+    bytesToSend += chunks[i].length;
+    endIndex = i + 1;
   }
 
-  // Send in chunks to prevent overwhelming the browser
-  let dataToSend = ptySession.outputBuffer;
-  ptySession.outputBuffer = '';
+  // Join only the chunks we're sending (single string allocation)
+  const dataToSend = chunks.slice(startIndex, endIndex).join('');
+
+  // Update the sent index
+  ptySession.outputChunksSentIndex = endIndex;
+
+  // If we've sent all chunks, clear the buffer entirely to free memory
+  if (endIndex >= chunks.length) {
+    ptySession.outputBufferChunks = [];
+    ptySession.outputBufferSize = 0;
+    ptySession.outputChunksSentIndex = 0;
+  }
+
   ptySession.lastFlushTime = now;
-
-  // If data is larger than max chunk, send first chunk and reschedule rest
-  if (dataToSend.length > OUTPUT_MAX_CHUNK_SIZE) {
-    const chunk = dataToSend.slice(0, OUTPUT_MAX_CHUNK_SIZE);
-    ptySession.outputBuffer = dataToSend.slice(OUTPUT_MAX_CHUNK_SIZE);
-    dataToSend = chunk;
-
-    // Schedule next chunk with throttling
-    ptySession.outputFlushTimer = setTimeout(() => {
-      flushOutputBuffer(ptySession, sessionId);
-    }, OUTPUT_THROTTLE_MS);
-  }
 
   const event: WsPtyDataEvent = {
     type: 'pty-data',
@@ -500,14 +612,34 @@ function flushOutputBuffer(ptySession: PtySession, sessionId: string): void {
   };
 
   broadcastToClients(ptySession, event);
+
+  // Schedule next flush if more data remains
+  if (ptySession.outputChunksSentIndex < ptySession.outputBufferChunks.length) {
+    ptySession.outputFlushTimer = setTimeout(() => {
+      flushOutputBuffer(ptySession, sessionId);
+    }, OUTPUT_THROTTLE_MS);
+  }
 }
 
 function broadcastToClients(ptySession: PtySession, event: WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent): void {
   const message = JSON.stringify(event);
+  const dataLength = event.type === 'pty-data' ? event.data.length : 0;
+
   for (const client of ptySession.clients) {
     if (client.readyState === 1) { // WebSocket.OPEN
       client.send(message);
+
+      // Track pending bytes for ACK-based flow control (only for pty-data events)
+      if (dataLength > 0) {
+        const currentPending = ptySession.pendingBytes.get(client) || 0;
+        ptySession.pendingBytes.set(client, currentPending + dataLength);
+      }
     }
+  }
+
+  // Check if we need to pause PTY due to backpressure
+  if (dataLength > 0) {
+    checkAndPausePty(ptySession);
   }
 }
 
@@ -572,8 +704,11 @@ function cleanupSession(sessionId: string): void {
       clearTimeout(ptySession.outputFlushTimer);
     }
     // Clear buffers to free memory
-    ptySession.outputBuffer = '';
+    ptySession.outputBufferChunks = [];
+    ptySession.outputBufferSize = 0;
+    ptySession.outputChunksSentIndex = 0;
     ptySession.retryDetectionBuffer = '';
+    ptySession.pendingBytes.clear();  // Clear ACK tracking
     ptySession.clients.clear();
     ptySessions.delete(sessionId);
     console.log(`[PTY] Session ${sessionId} cleaned up`);

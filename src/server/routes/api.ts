@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { readFile, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
@@ -8,8 +7,9 @@ import { listSessions, getSession, listRuns, getRun, getLatestRun, getRunsForSes
 import { addSubscription, getVapidPublicKey } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
-import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, checkoutMainAndPull, createAndCheckoutBranch, branchExists, checkoutBranch } from '../services/git.js';
+import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, createWorktree, getWorktreePath } from '../services/git.js';
 import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions } from '../services/pty-manager.js';
+import { pathExists } from '../utils/fs.js';
 import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
@@ -68,20 +68,27 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Check if workspace path exists
-    if (!existsSync(workspace.path)) {
+    if (!(await pathExists(workspace.path))) {
       return reply.status(400).send({ error: 'Workspace path does not exist' });
     }
 
-    // Git branch setup
+    // Git worktree setup
     const branchName = generateBranchName(prompt);
     const isRepo = await isGitRepo(workspace.path);
 
+    let workspacePath = workspace.path;
+    let originalRepoPath: string | undefined;
+
     if (isRepo) {
       try {
-        await checkoutMainAndPull(workspace.path);
-        await createAndCheckoutBranch(workspace.path, branchName);
+        // Create a worktree for this session - fully isolated, no checkout needed in main repo
+        workspacePath = await createWorktree(workspace.path, branchName);
+        originalRepoPath = workspace.path;
+        console.log(`[Git] Created worktree at ${workspacePath} for branch ${branchName}`);
       } catch (error) {
-        console.error('Git branch setup failed:', error);
+        console.error('Git worktree setup failed:', error);
+        // Fall back to using main repo path if worktree creation fails
+        workspacePath = workspace.path;
       }
     }
 
@@ -89,15 +96,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const selectedAgent = agent || 'claude';
     const cliSessionId = selectedAgent === 'claude' ? uuidv4() : undefined;
 
-    // Create session record
+    // Create session record with worktree path
     const session = await createSessionStore(workspaceId, prompt, branchName, {
       agent: selectedAgent,
       interactive: true,
       copilotSessionId: cliSessionId,
+      workspacePath,
+      originalRepoPath,
     });
 
     // Start PTY session
-    const ptySession = startInteractiveSession(session, prompt, false);
+    const ptySession = await startInteractiveSession(session, prompt, false);
     if (!ptySession) {
       return reply.status(500).send({ error: 'Failed to start interactive session' });
     }
@@ -110,7 +119,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // Resume an interactive session (start PTY and attach to existing session)
   app.post<{ Params: { id: string } }>('/api/sessions/:id/resume', async (request, reply) => {
     const sessionId = request.params.id;
-    
+
     const session = await getSession(sessionId);
     if (!session) {
       return reply.status(404).send({ error: 'Session not found' });
@@ -121,21 +130,25 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return { sessionId, active: true, message: 'Session already active' };
     }
 
-    // Git: checkout the session's branch
-    const isRepo = await isGitRepo(session.workspacePath);
-    if (isRepo && session.branchName) {
+    // Ensure worktree exists if this is a git-backed session
+    // For older sessions that don't have originalRepoPath, the worktree may not exist
+    if (session.originalRepoPath && session.branchName) {
       try {
-        const exists = await branchExists(session.workspacePath, session.branchName);
-        if (exists) {
-          await checkoutBranch(session.workspacePath, session.branchName);
+        const existingWorktree = await getWorktreePath(session.originalRepoPath, session.branchName);
+        if (!existingWorktree) {
+          // Recreate the worktree if it was removed
+          const worktreePath = await createWorktree(session.originalRepoPath, session.branchName);
+          console.log(`[Git] Recreated worktree at ${worktreePath} for session ${sessionId}`);
         }
       } catch (error) {
-        console.error('Git branch checkout failed:', error);
+        console.error(`[Git] Failed to ensure worktree exists for session ${sessionId}:`, error);
+        // Continue anyway - PTY will run in whatever directory exists
       }
     }
 
     // Start PTY session in resume mode
-    const ptySession = startInteractiveSession(session, undefined, true);
+    // PTY uses session.workspacePath which is already set to the worktree path
+    const ptySession = await startInteractiveSession(session, undefined, true);
     if (!ptySession) {
       return reply.status(500).send({ error: 'Failed to resume interactive session' });
     }
@@ -355,7 +368,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Handle folder creation/existence
-    if (!existsSync(path)) {
+    if (!(await pathExists(path))) {
       // Auto-create directory if it doesn't exist
       try {
         await mkdir(path, { recursive: true });
@@ -405,7 +418,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     const basePath = targetPath || join(process.env.HOME || '/tmp', 'remote-agent-workspaces');
     const workspacePath = join(basePath, name.toLowerCase().replace(/\s+/g, '-'));
 
-    if (existsSync(workspacePath)) {
+    if (await pathExists(workspacePath)) {
       return reply.status(400).send({ error: 'Workspace path already exists' });
     }
 
@@ -493,7 +506,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const image = run.images.find(i => i.filename === filename);
-      if (!image || !existsSync(image.path)) {
+      if (!image || !(await pathExists(image.path))) {
         return reply.status(404).send({ error: 'Image not found' });
       }
 

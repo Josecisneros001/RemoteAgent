@@ -1,9 +1,9 @@
 import chokidar, { type FSWatcher } from 'chokidar';
 import { join, basename } from 'path';
-import { existsSync } from 'fs';
 import { mkdir, readdir, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { addImage } from './run-store.js';
+import { pathExists } from '../utils/fs.js';
 import type { ImageResult, WsImageEvent } from '../types.js';
 
 type ImageCallback = (event: WsImageEvent) => void;
@@ -39,7 +39,7 @@ export async function startWatching(
   const outputsDir = getRunOutputsDir(runId);
   
   // Ensure outputs directory exists
-  if (!existsSync(outputsDir)) {
+  if (!(await pathExists(outputsDir))) {
     await mkdir(outputsDir, { recursive: true });
   }
 
@@ -113,8 +113,8 @@ export async function syncImagesForRun(
   runId: string
 ): Promise<ImageResult[]> {
   const outputsDir = getRunOutputsDir(runId);
-  
-  if (!existsSync(outputsDir)) {
+
+  if (!(await pathExists(outputsDir))) {
     return [];
   }
 

@@ -5,27 +5,31 @@ import { WelcomeView } from './components/WelcomeView/WelcomeView';
 import { NewSessionForm } from './components/NewSessionForm/NewSessionForm';
 import { SessionView } from './components/SessionView/SessionView';
 import { InteractiveTerminal } from './components/InteractiveTerminal/InteractiveTerminal';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import './App.css';
 
 function App() {
   const { currentView, currentSession } = useApp();
   
   // Track which terminal sessions are active (PTY running on server)
-  const [activeTerminalSessions, setActiveTerminalSessions] = useState<Set<string>>(new Set());
+  // Using useRef to avoid excessive re-renders when sessions are added/removed
+  const activeTerminalSessionsRef = useRef<Set<string>>(new Set());
+  const [, setTerminalSessionsVersion] = useState(0);
 
   // Handle terminal becoming active
   const handleTerminalActive = useCallback((sessionId: string) => {
-    setActiveTerminalSessions(prev => new Set(prev).add(sessionId));
+    if (!activeTerminalSessionsRef.current.has(sessionId)) {
+      activeTerminalSessionsRef.current.add(sessionId);
+      setTerminalSessionsVersion(v => v + 1); // Trigger re-render only when needed
+    }
   }, []);
 
   // Handle terminal exit
   const handleTerminalExit = useCallback((sessionId: string) => {
-    setActiveTerminalSessions(prev => {
-      const next = new Set(prev);
-      next.delete(sessionId);
-      return next;
-    });
+    if (activeTerminalSessionsRef.current.has(sessionId)) {
+      activeTerminalSessionsRef.current.delete(sessionId);
+      setTerminalSessionsVersion(v => v + 1);
+    }
   }, []);
 
   return (
@@ -33,7 +37,7 @@ function App() {
       <MobileHeader />
       
       <div className="app-container">
-        <Sidebar activeTerminalSessions={activeTerminalSessions} />
+        <Sidebar activeTerminalSessions={activeTerminalSessionsRef.current} />
         
         <main className="main-content">
           {currentView === 'welcome' && <WelcomeView />}
@@ -42,14 +46,14 @@ function App() {
             <SessionView 
               onTerminalActive={handleTerminalActive}
               onTerminalExit={handleTerminalExit}
-              isTerminalActive={currentSession ? activeTerminalSessions.has(currentSession.id) : false}
+              isTerminalActive={currentSession ? activeTerminalSessionsRef.current.has(currentSession.id) : false}
             />
           )}
           
           {/* Render ALL terminals at App level - completely outside SessionView to prevent unmounting */}
-          {activeTerminalSessions.size > 0 && (
-            <div className={`app-terminals-container ${currentView === 'session' && currentSession?.interactive && activeTerminalSessions.has(currentSession.id) ? 'visible' : 'hidden'}`}>
-              {Array.from(activeTerminalSessions).map(sessionId => (
+          {activeTerminalSessionsRef.current.size > 0 && (
+            <div className={`app-terminals-container ${currentView === 'session' && currentSession?.interactive && activeTerminalSessionsRef.current.has(currentSession.id) ? 'visible' : 'hidden'}`}>
+              {Array.from(activeTerminalSessionsRef.current).map(sessionId => (
                 <div 
                   key={sessionId}
                   className={`app-terminal-instance ${currentSession?.id === sessionId ? 'visible' : 'hidden'}`}

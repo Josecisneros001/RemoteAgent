@@ -82,17 +82,24 @@ export function useNotifications() {
           if (!sw) throw new Error('No service worker found');
           
           return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => reject(new Error('Service worker activation timeout')), 10000);
-            
-            sw.addEventListener('statechange', () => {
+            const handleStateChange = () => {
               if (sw.state === 'activated') {
                 clearTimeout(timeout);
+                sw.removeEventListener('statechange', handleStateChange);
                 resolve(reg);
               } else if (sw.state === 'redundant') {
                 clearTimeout(timeout);
+                sw.removeEventListener('statechange', handleStateChange);
                 reject(new Error('Service worker became redundant'));
               }
-            });
+            };
+
+            const timeout = setTimeout(() => {
+              sw.removeEventListener('statechange', handleStateChange);
+              reject(new Error('Service worker activation timeout'));
+            }, 10000);
+
+            sw.addEventListener('statechange', handleStateChange);
           });
         };
         

@@ -3,13 +3,13 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync } from 'fs';
 import { loadConfig, getConfig } from './services/config.js';
 import { initPush } from './services/push.js';
 import { addClient } from './services/websocket.js';
 import { registerRoutes } from './routes/api.js';
-import { attachClient, detachClient, sendInput, resizePty, isSessionActive, stopAllSessions } from './services/pty-manager.js';
-import type { WsPtyInputEvent, WsPtyResizeEvent } from './types.js';
+import { attachClient, detachClient, sendInput, resizePty, isSessionActive, stopAllSessions, handleClientAck } from './services/pty-manager.js';
+import { pathExists } from './utils/fs.js';
+import type { WsPtyInputEvent, WsPtyResizeEvent, WsPtyAckEvent } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,23 +26,46 @@ async function main() {
     logger: false,
   });
 
-  // Register WebSocket plugin
-  await app.register(fastifyWebsocket);
+  // Register WebSocket plugin with per-message deflate compression
+  // Terminal output (ANSI codes, whitespace) compresses extremely well (60-70% reduction)
+  await app.register(fastifyWebsocket, {
+    options: {
+      perMessageDeflate: {
+        zlibDeflateOptions: {
+          level: 3,  // Compression level 1-9 (3 is good balance of speed/ratio)
+          chunkSize: 1024,
+        },
+        zlibInflateOptions: {
+          chunkSize: 10 * 1024,
+        },
+        // Disable context takeover for better memory usage with many connections
+        clientNoContextTakeover: true,
+        serverNoContextTakeover: true,
+        // Only compress messages larger than this threshold.
+        // Lowered from 1KB to 512B because:
+        // - Batched PTY output often falls in 512-1024 byte range during moderate activity
+        // - Terminal output (ANSI codes, whitespace) compresses 60-70%, so 512B → ~200B
+        // - Even with ~50B compression overhead, net savings is ~260B per message
+        // - Mobile connections (primary use case) benefit most from bandwidth reduction
+        threshold: 512,
+      },
+    },
+  });
 
   // Determine which client to serve
   const reactClientPath = join(__dirname, '../client');
-  const clientPath = existsSync(reactClientPath) ? reactClientPath : new Error('Client build not found. Please build the client before starting the server.');
-  
-  if (clientPath instanceof Error) {
-    console.error(clientPath.message);
+  const clientExists = await pathExists(reactClientPath);
+
+  if (!clientExists) {
+    console.error('Client build not found. Please build the client before starting the server.');
     process.exit(1);
   }
 
-  console.log(`📦 Serving client from: ${clientPath}`);
+  console.log(`📦 Serving client from: ${reactClientPath}`);
 
   // Register static file serving for client
   await app.register(fastifyStatic, {
-    root: clientPath,
+    root: reactClientPath,
     prefix: '/',
   });
 
@@ -97,6 +120,12 @@ async function main() {
           if (resizeEvent.cols > 0 && resizeEvent.cols <= 500 &&
               resizeEvent.rows > 0 && resizeEvent.rows <= 500) {
             resizePty(sessionId, resizeEvent.cols, resizeEvent.rows);
+          }
+        } else if (data.type === 'pty-ack') {
+          const ackEvent = data as WsPtyAckEvent;
+          // Validate ACK bytes (must be positive and reasonable)
+          if (ackEvent.bytes > 0 && ackEvent.bytes <= 1000000) {
+            handleClientAck(sessionId, socket, ackEvent.bytes);
           }
         }
       } catch (error) {

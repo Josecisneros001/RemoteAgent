@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { mkdir } from 'fs/promises';
+import { pathExists } from '../utils/fs.js';
 import type { GitChanges, GitFileChange, FileDiff, CommitInfo } from '../types.js';
 
 // Execute a git command and return output
@@ -120,6 +122,95 @@ export async function branchExists(workspacePath: string, branchName: string): P
     return true;
   } catch {
     return false;
+  }
+}
+
+// ==================== WORKTREE MANAGEMENT ====================
+
+/**
+ * Create a git worktree for a branch.
+ * Worktrees are created in <repo>/.worktrees/<branchName>/
+ * This allows multiple sessions to work on the same repo without conflicts.
+ *
+ * @param repoPath - The path to the main git repository
+ * @param branchName - The branch name for the worktree
+ * @returns The path to the created worktree
+ */
+export async function createWorktree(repoPath: string, branchName: string): Promise<string> {
+  const worktreesDir = join(repoPath, '.worktrees');
+  const worktreePath = join(worktreesDir, branchName);
+
+  // Create .worktrees directory if needed
+  await mkdir(worktreesDir, { recursive: true });
+
+  // Check if worktree already exists
+  if (await pathExists(worktreePath)) {
+    return worktreePath;
+  }
+
+  // Create worktree with new branch (or existing branch)
+  // git worktree add <path> -b <branch> OR git worktree add <path> <existing-branch>
+  try {
+    // Try to create with new branch
+    await execGit(['worktree', 'add', worktreePath, '-b', branchName], repoPath);
+  } catch (e) {
+    // Branch might exist, try without -b
+    await execGit(['worktree', 'add', worktreePath, branchName], repoPath);
+  }
+
+  return worktreePath;
+}
+
+/**
+ * Remove a git worktree.
+ *
+ * @param repoPath - The path to the main git repository
+ * @param branchName - The branch name of the worktree to remove
+ */
+export async function removeWorktree(repoPath: string, branchName: string): Promise<void> {
+  const worktreePath = join(repoPath, '.worktrees', branchName);
+  if (await pathExists(worktreePath)) {
+    await execGit(['worktree', 'remove', worktreePath, '--force'], repoPath);
+  }
+}
+
+/**
+ * Get the path to an existing worktree, or null if it doesn't exist.
+ *
+ * @param repoPath - The path to the main git repository
+ * @param branchName - The branch name of the worktree
+ * @returns The worktree path or null
+ */
+export async function getWorktreePath(repoPath: string, branchName: string): Promise<string | null> {
+  const worktreePath = join(repoPath, '.worktrees', branchName);
+  if (await pathExists(worktreePath)) {
+    return worktreePath;
+  }
+  return null;
+}
+
+/**
+ * Get the main repository path from a worktree path.
+ * This is useful when we have a worktree path and need to find the main repo.
+ *
+ * @param workspacePath - Could be either a main repo path or a worktree path
+ * @returns The main repository path
+ */
+export async function getMainRepoPath(workspacePath: string): Promise<string> {
+  try {
+    // git rev-parse --git-common-dir gives the path to the main repo's .git
+    const gitCommonDir = await execGit(['rev-parse', '--git-common-dir'], workspacePath);
+    // gitCommonDir is typically "/path/to/repo/.git" or "." if in main repo
+    if (gitCommonDir === '.git' || gitCommonDir === '.') {
+      return workspacePath;
+    }
+    // Remove the ".git" suffix to get the repo path
+    if (gitCommonDir.endsWith('.git')) {
+      return gitCommonDir.slice(0, -5); // Remove "/.git"
+    }
+    return dirname(gitCommonDir);
+  } catch {
+    return workspacePath;
   }
 }
 

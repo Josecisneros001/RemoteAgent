@@ -1,8 +1,8 @@
 import { readFile, writeFile, readdir, mkdir } from 'fs/promises';
-import { existsSync } from 'fs';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfigDir, getWorkspace } from './config.js';
+import { pathExists } from '../utils/fs.js';
 import type {
   Session, SessionSummary,
   Run, RunSummary, LogEntry, ValidationResult, ImageResult, RunPhase, CommitInfo,
@@ -58,10 +58,10 @@ function getRunPath(runId: string): string {
 async function ensureDirs(): Promise<void> {
   const sessionsDir = getSessionsDir();
   const runsDir = getRunsDir();
-  if (!existsSync(sessionsDir)) {
+  if (!(await pathExists(sessionsDir))) {
     await mkdir(sessionsDir, { recursive: true });
   }
-  if (!existsSync(runsDir)) {
+  if (!(await pathExists(runsDir))) {
     await mkdir(runsDir, { recursive: true });
   }
 }
@@ -83,6 +83,8 @@ export async function createSession(
     agent?: AgentType;
     interactive?: boolean;
     copilotSessionId?: string;
+    workspacePath?: string;       // Override workspace path (e.g., worktree path)
+    originalRepoPath?: string;    // Original git repo path (when using worktrees)
   } = {}
 ): Promise<Session> {
   await ensureDirs();
@@ -96,7 +98,8 @@ export async function createSession(
     id: uuidv4(),
     agent: options.agent || 'claude',
     workspaceId,
-    workspacePath: workspace.path,
+    workspacePath: options.workspacePath || workspace.path,
+    originalRepoPath: options.originalRepoPath,
     friendlyName: generateFriendlyName(initialPrompt),
     branchName,
     createdAt: new Date().toISOString(),
@@ -117,7 +120,7 @@ export async function saveSession(session: Session): Promise<void> {
 
 export async function getSession(sessionId: string): Promise<Session | null> {
   const path = getSessionPath(sessionId);
-  if (!existsSync(path)) {
+  if (!(await pathExists(path))) {
     return null;
   }
 
@@ -163,7 +166,7 @@ export async function listSessions(workspaceId?: string): Promise<SessionSummary
   await ensureDirs();
   const sessionsDir = getSessionsDir();
 
-  if (!existsSync(sessionsDir)) {
+  if (!(await pathExists(sessionsDir))) {
     return [];
   }
 
@@ -254,7 +257,7 @@ export async function saveRun(run: Run): Promise<void> {
 
 export async function getRun(runId: string): Promise<Run | null> {
   const path = getRunPath(runId);
-  if (!existsSync(path)) {
+  if (!(await pathExists(path))) {
     return null;
   }
 
@@ -280,7 +283,7 @@ export async function getRunsForSession(sessionId: string): Promise<Run[]> {
   await ensureDirs();
   const runsDir = getRunsDir();
 
-  if (!existsSync(runsDir)) {
+  if (!(await pathExists(runsDir))) {
     return [];
   }
 
@@ -310,7 +313,7 @@ export async function listRuns(): Promise<RunSummary[]> {
   await ensureDirs();
   const runsDir = getRunsDir();
 
-  if (!existsSync(runsDir)) {
+  if (!(await pathExists(runsDir))) {
     return [];
   }
 

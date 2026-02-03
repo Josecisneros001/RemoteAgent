@@ -1,8 +1,8 @@
 import webPush from 'web-push';
 import { readFile, writeFile } from 'fs/promises';
-import { existsSync } from 'fs';
 import { join } from 'path';
 import { getConfig, getConfigDir, updateConfig } from './config.js';
+import { pathExists } from '../utils/fs.js';
 import type { PushSubscription } from '../types.js';
 
 const SUBSCRIPTIONS_PATH = join(getConfigDir(), 'push-subscriptions.json');
@@ -37,7 +37,7 @@ export async function initPush(): Promise<void> {
 }
 
 async function loadSubscriptions(): Promise<void> {
-  if (existsSync(SUBSCRIPTIONS_PATH)) {
+  if (await pathExists(SUBSCRIPTIONS_PATH)) {
     try {
       const content = await readFile(SUBSCRIPTIONS_PATH, 'utf-8');
       subscriptions = JSON.parse(content);
