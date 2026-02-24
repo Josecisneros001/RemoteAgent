@@ -103,6 +103,26 @@ export interface WsEvent {
   exitCode?: number;  // Exit code for pty-exit
 }
 
+// CLI Session Discovery types
+export interface CliSession {
+  id: string;
+  source: 'claude' | 'copilot';
+  directory: string;
+  directoryName: string;
+  prettyName: string;
+  fullPrompt: string;
+  lastActive: string;
+  createdAt: string | null;
+  raSessionId: string | null;
+  isActive: boolean;
+}
+
+export interface CliSessionsResponse {
+  sessions: CliSession[];
+  total: number;
+  cacheTimestamp: string;
+}
+
 // View States
 export type ViewType = 'welcome' | 'new-session' | 'session';
 export type RunViewType = 'new-run' | 'run-detail' | 'empty';

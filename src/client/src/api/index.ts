@@ -1,4 +1,4 @@
-import type { Config, Session, Run, GitChanges, CommitFile, AgentType } from '../types';
+import type { Config, Session, Run, GitChanges, CommitFile, AgentType, CliSessionsResponse } from '../types';
 
 const API_BASE = '';
 
@@ -185,4 +185,37 @@ export async function subscribePush(subscription: PushSubscriptionJSON): Promise
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(subscription),
   });
+}
+
+// ==================== CLI Session Discovery API ====================
+
+export async function fetchCliSessions(limit: number = 15, offset: number = 0): Promise<CliSessionsResponse> {
+  const res = await fetch(`${API_BASE}/api/cli-sessions?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error('Failed to fetch CLI sessions');
+  return res.json();
+}
+
+export async function refreshCliSessions(): Promise<CliSessionsResponse> {
+  const res = await fetch(`${API_BASE}/api/cli-sessions/refresh`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error('Failed to refresh CLI sessions');
+  return res.json();
+}
+
+export async function resumeCliSession(req: {
+  id: string;
+  source: 'claude' | 'copilot';
+  directory: string;
+}): Promise<{ sessionId: string; workspaceId: string }> {
+  const res = await fetch(`${API_BASE}/api/cli-sessions/${req.id}/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || res.statusText);
+  }
+  return res.json();
 }

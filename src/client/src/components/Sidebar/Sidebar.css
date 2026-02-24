@@ -120,13 +120,23 @@
   letter-spacing: 0.5px;
 }
 
-.workspace-filter {
-  padding: 4px 8px;
-  font-size: 0.6875rem;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-secondary);
+.refresh-btn {
+  background: none;
+  border: none;
+  font-size: 0.875rem;
+  cursor: pointer;
+  padding: 2px 4px;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+
+.refresh-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .sidebar-overlay {

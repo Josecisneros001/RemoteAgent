@@ -5,9 +5,69 @@
   min-height: 0;
 }
 
+/* Group */
+.session-group {
+  margin-bottom: 12px;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  position: sticky;
+  top: 0;
+  background: var(--bg-sidebar);
+  z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.session-group-header:hover {
+  color: var(--text-primary);
+}
+
+.session-group-chevron {
+  font-size: 0.75rem;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+}
+
+.session-group-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.session-group-icon {
+  font-size: 0.75rem;
+}
+
+.session-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.session-group-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 0 6px;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+/* Session items */
 .session-item {
-  padding: 12px;
-  margin-bottom: 8px;
+  padding: 8px 10px;
+  margin-bottom: 4px;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -24,87 +84,108 @@
   background: rgba(233, 69, 96, 0.1);
 }
 
+.session-item.terminal-running {
+  border-left: 3px solid var(--success);
+}
+
+.session-item.resuming {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .session-item-header {
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .session-item-agent {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   flex-shrink: 0;
 }
 
 .session-item-name {
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 500;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
 }
 
-.session-item-branch {
-  font-size: 0.6875rem;
-  color: var(--text-secondary);
-  margin-bottom: 4px;
-}
-
-.session-item-workspace {
-  font-size: 0.6875rem;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.session-item-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: 0.6875rem;
-  color: var(--text-secondary);
-}
-
-.session-item-status {
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 500;
-}
-
-.session-item-status.completed { background: var(--success); color: #000; }
-.session-item-status.running { background: var(--warning); color: #000; }
-.session-item-status.failed { background: var(--error); color: #fff; }
-
-.session-item-interactive {
-  margin-left: auto;
-  font-size: 0.875rem;
-}
-
-.session-item-mode {
-  font-size: 0.6875rem;
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.session-item.interactive {
-  border-left: 3px solid var(--accent);
-}
-
-.session-item.terminal-running {
-  border-left: 3px solid var(--success);
-}
-
-.session-item.terminal-running .session-item-mode {
-  color: var(--success);
+.session-item-name.expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+  word-break: break-word;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin: 2px 0;
 }
 
 .session-item-running {
   margin-left: auto;
   font-size: 0.75rem;
+  flex-shrink: 0;
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.session-item-meta {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  font-size: 0.625rem;
+  color: var(--text-secondary);
+}
+
+.session-item-time {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.empty-state {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.load-more-btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-top: 4px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.load-more-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sessions-loading {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  text-align: center;
+  padding: 16px;
 }
 
 @keyframes pulse {

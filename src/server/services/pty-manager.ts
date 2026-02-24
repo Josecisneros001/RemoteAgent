@@ -4,6 +4,7 @@ import type { WebSocket } from 'ws';
 import { readdir, stat } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
+import { execSync } from 'child_process';
 import { sendNotification } from './push.js';
 import { updateSessionCopilotId } from './run-store.js';
 import type { Session, WsPtyDataEvent, WsInteractionNeededEvent, WsPtyExitEvent } from '../types.js';
@@ -30,6 +31,34 @@ const PAUSE_TIMEOUT_MS = 30000;  // 30 seconds - force resume if no ACKs (preven
 
 // Copilot session state directory
 const COPILOT_SESSION_STATE_DIR = join(homedir(), '.copilot', 'session-state');
+
+/**
+ * Resolve a command name to its full path.
+ * node-pty on Windows sometimes can't find commands in PATH, so we resolve explicitly.
+ * On Windows, prefer .cmd/.exe over shell scripts (which node-pty can't execute).
+ */
+function resolveCommand(command: string): string {
+  try {
+    const isWindows = process.platform === 'win32';
+    const result = execSync(
+      isWindows ? `where ${command}` : `which ${command}`,
+      { encoding: 'utf-8', timeout: 5000 }
+    ).trim();
+    const lines = result.split(/\r?\n/).filter(Boolean);
+
+    if (isWindows) {
+      // Prefer .cmd or .exe over shell scripts (node-pty needs Windows-native executables)
+      const cmdOrExe = lines.find(l => /\.(cmd|exe)$/i.test(l));
+      if (cmdOrExe) return cmdOrExe;
+    }
+
+    // Fall back to first result
+    if (lines[0]) return lines[0];
+  } catch {
+    // Fall through to return original command
+  }
+  return command;
+}
 
 /**
  * Get existing Copilot session IDs from ~/.copilot/session-state/
@@ -180,8 +209,14 @@ export async function startInteractiveSession(
   console.log(`[PTY] Command: ${command} ${args.join(' ')}`);
   console.log(`[PTY] Session copilotSessionId: ${session.copilotSessionId}`);
 
+  // Resolve command to full path (node-pty on Windows can fail to find commands in PATH)
+  const resolvedCommand = resolveCommand(command);
+  if (resolvedCommand !== command) {
+    console.log(`[PTY] Resolved ${command} -> ${resolvedCommand}`);
+  }
+
   try {
-    const ptyProcess = pty.spawn(command, args, {
+    const ptyProcess = pty.spawn(resolvedCommand, args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 40,
@@ -385,7 +420,8 @@ export async function startInteractiveSession(
     return ptySession;
   } catch (error) {
     console.error(`[PTY] Failed to start session:`, error);
-    return null;
+    // Re-throw so callers can get the error details
+    throw error;
   }
 }
 

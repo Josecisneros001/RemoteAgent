@@ -3,32 +3,20 @@ import { useNotifications } from '../../hooks/useNotifications';
 import { SessionList } from '../SessionList/SessionList';
 import './Sidebar.css';
 
-interface SidebarProps {
-  activeTerminalSessions?: Set<string>;
-}
-
-export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
+export function Sidebar() {
   const {
     sidebarOpen,
     setSidebarOpen,
     connectionStatus,
     setCurrentView,
-    config,
-    workspaceFilter,
-    setWorkspaceFilter,
-    loadSessions,
+    refreshCliSessions,
+    cliSessionsLoading,
   } = useApp();
 
   const { notificationsEnabled, isSubscribing, toggleNotifications } = useNotifications();
 
   const handleNewSession = () => {
     setCurrentView('new-session');
-  };
-
-  const handleWorkspaceFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    setWorkspaceFilter(value);
-    loadSessions(value || undefined);
   };
 
   return (
@@ -64,24 +52,22 @@ export function Sidebar({ activeTerminalSessions = new Set() }: SidebarProps) {
         <div className="sessions-container">
           <div className="sessions-header">
             <span>Sessions</span>
-            <select 
-              className="workspace-filter" 
-              value={workspaceFilter}
-              onChange={handleWorkspaceFilterChange}
+            <button
+              className="refresh-btn"
+              onClick={refreshCliSessions}
+              disabled={cliSessionsLoading}
+              title="Refresh sessions"
             >
-              <option value="">All Workspaces</option>
-              {config?.workspaces?.map(ws => (
-                <option key={ws.id} value={ws.id}>{ws.name}</option>
-              ))}
-            </select>
+              🔄
+            </button>
           </div>
-          <SessionList activeTerminalSessions={activeTerminalSessions} />
+          <SessionList />
         </div>
       </aside>
 
       {sidebarOpen && (
-        <div 
-          className="sidebar-overlay active" 
+        <div
+          className="sidebar-overlay active"
           onClick={() => setSidebarOpen(false)}
         />
       )}

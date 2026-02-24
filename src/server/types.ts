@@ -216,6 +216,32 @@ export interface PushSubscription {
   };
 }
 
+// CLI Session Discovery types
+export interface CliSession {
+  id: string;                    // CLI session UUID
+  source: 'claude' | 'copilot';
+  directory: string;             // Decoded absolute path to project
+  directoryName: string;         // Last path segment (e.g. "RemoteAgent")
+  prettyName: string;            // First 30 chars of initial prompt
+  fullPrompt: string;            // Full initial prompt (up to 200 chars)
+  lastActive: string;            // ISO 8601 (file mtime or updated_at)
+  createdAt: string | null;      // ISO 8601
+  raSessionId: string | null;    // If tracked by RA, its session ID
+  isActive: boolean;             // PTY currently running in RA
+}
+
+export interface CliSessionsResponse {
+  sessions: CliSession[];
+  total: number;                 // Total available (for "load more")
+  cacheTimestamp: string;
+}
+
+export interface ResumeCliSessionRequest {
+  id: string;                    // CLI session UUID
+  source: 'claude' | 'copilot';
+  directory: string;             // Working directory
+}
+
 // API request types
 export interface CreateSessionRequest {
   workspaceId: string;

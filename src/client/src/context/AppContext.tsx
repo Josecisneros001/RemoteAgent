@@ -1,24 +1,29 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Config, Session, Run, WsEvent, ViewType } from '../types';
+import type { Config, Session, Run, WsEvent, ViewType, CliSession } from '../types';
 import * as api from '../api';
 
 interface AppState {
   // Connection
   connectionStatus: 'connecting' | 'connected' | 'disconnected';
-  
+
   // Config
   config: Config | null;
-  
-  // Sessions
+
+  // Sessions (RA sessions - kept for session detail views)
   sessions: Session[];
   currentSessionId: string | null;
   currentSession: Session | null;
-  
+
+  // CLI Sessions (discovered from Claude/Copilot CLI storage)
+  cliSessions: CliSession[];
+  cliSessionsTotal: number;
+  cliSessionsLoading: boolean;
+
   // Runs
   currentRuns: Run[];
   currentRunId: string | null;
-  
+
   // View state
   currentView: ViewType;
   workspaceFilter: string;
@@ -37,6 +42,9 @@ interface AppContextType extends AppState {
   setSidebarOpen: (open: boolean) => void;
   setCurrentRunId: (runId: string | null) => void;
   refreshSessions: () => Promise<void>;
+  // CLI Sessions actions
+  loadCliSessions: () => Promise<void>;
+  refreshCliSessions: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -50,6 +58,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sessions: [],
     currentSessionId: null,
     currentSession: null,
+    cliSessions: [],
+    cliSessionsTotal: 0,
+    cliSessionsLoading: false,
     currentRuns: [],
     currentRunId: null,
     currentView: 'welcome',
@@ -60,11 +71,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const runDetailDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionRunsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  
+
   // Keep refs for current IDs to use in WebSocket handler
   const currentSessionIdRef = useRef<string | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
-  
+
   useEffect(() => {
     currentSessionIdRef.current = state.currentSessionId;
     currentRunIdRef.current = state.currentRunId;
@@ -86,6 +97,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error('Failed to load sessions:', error);
       setState(s => ({ ...s, sessions: [] }));
+    }
+  }, []);
+
+  // CLI Sessions: load all sessions
+  const loadCliSessions = useCallback(async () => {
+    setState(s => ({ ...s, cliSessionsLoading: true }));
+    try {
+      const data = await api.fetchCliSessions(0, 0); // limit=0 means all
+      setState(s => ({
+        ...s,
+        cliSessions: data.sessions,
+        cliSessionsTotal: data.total,
+        cliSessionsLoading: false,
+      }));
+    } catch (error) {
+      console.error('Failed to load CLI sessions:', error);
+      setState(s => ({ ...s, cliSessionsLoading: false }));
+    }
+  }, []);
+
+  // CLI Sessions: force refresh
+  const refreshCliSessionsFn = useCallback(async () => {
+    setState(s => ({ ...s, cliSessionsLoading: true }));
+    try {
+      const data = await api.refreshCliSessions();
+      setState(s => ({
+        ...s,
+        cliSessions: data.sessions,
+        cliSessionsTotal: data.total,
+        cliSessionsLoading: false,
+      }));
+    } catch (error) {
+      console.error('Failed to refresh CLI sessions:', error);
+      setState(s => ({ ...s, cliSessionsLoading: false }));
     }
   }, []);
 
@@ -209,7 +254,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (event.type === 'complete') {
         refreshSessions();
       }
-      
+
       if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId) {
         setState(s => ({
           ...s,
@@ -235,11 +280,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
 
-  // Initial data load
+  // Initial data load - load CLI sessions as the primary session list
   useEffect(() => {
     loadConfig();
-    loadSessions();
-  }, [loadConfig, loadSessions]);
+    loadCliSessions();
+    loadSessions(); // Still load RA sessions for detail views
+  }, [loadConfig, loadCliSessions, loadSessions]);
 
   const value: AppContextType = {
     ...state,
@@ -253,6 +299,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSidebarOpen,
     setCurrentRunId,
     refreshSessions,
+    loadCliSessions,
+    refreshCliSessions: refreshCliSessionsFn,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

@@ -63,14 +63,14 @@ async function main() {
 
   console.log(`📦 Serving client from: ${reactClientPath}`);
 
+  // Register API routes BEFORE static files to prevent route shadowing
+  await registerRoutes(app);
+
   // Register static file serving for client
   await app.register(fastifyStatic, {
     root: reactClientPath,
     prefix: '/',
   });
-
-  // Register API routes
-  await registerRoutes(app);
 
   // WebSocket endpoint for general events (logs, phases, etc.)
   app.get('/ws', { websocket: true }, (socket, req) => {

@@ -34,8 +34,8 @@ body {
 #app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
 }
 
 /* App Container */
@@ -48,7 +48,7 @@ body {
 /* Main Content */
 .main-content {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 16px;
   position: relative;
 }

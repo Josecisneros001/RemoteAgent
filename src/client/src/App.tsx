@@ -37,7 +37,7 @@ function App() {
       <MobileHeader />
       
       <div className="app-container">
-        <Sidebar activeTerminalSessions={activeTerminalSessionsRef.current} />
+        <Sidebar />
         
         <main className="main-content">
           {currentView === 'welcome' && <WelcomeView />}

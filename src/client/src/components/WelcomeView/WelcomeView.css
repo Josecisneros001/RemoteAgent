@@ -3,6 +3,7 @@
   justify-content: center;
   align-items: center;
   min-height: 60vh;
+  overflow-y: auto;
 }
 
 .welcome-content {

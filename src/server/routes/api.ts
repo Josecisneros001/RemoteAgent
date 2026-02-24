@@ -10,16 +10,23 @@ import { syncImagesForRun } from '../services/image-watcher.js';
 import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, createWorktree, getWorktreePath } from '../services/git.js';
 import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions } from '../services/pty-manager.js';
 import { pathExists } from '../utils/fs.js';
-import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest } from '../types.js';
+import { discoverAll, invalidateCache } from '../services/session-discovery.js';
+import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest, ResumeCliSessionRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ==================== CONFIG ====================
 
-  // Get config (workspace list)
+  // Get config (workspace list — only returns workspaces with valid paths)
   app.get('/api/config', async () => {
     const config = getConfig();
+    const validWorkspaces = [];
+    for (const ws of config.workspaces) {
+      if (await pathExists(ws.path)) {
+        validWorkspaces.push(ws);
+      }
+    }
     return {
-      workspaces: config.workspaces,
+      workspaces: validWorkspaces,
     };
   });
 
@@ -72,37 +79,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Workspace path does not exist' });
     }
 
-    // Git worktree setup
-    const branchName = generateBranchName(prompt);
-    const isRepo = await isGitRepo(workspace.path);
-
-    let workspacePath = workspace.path;
-    let originalRepoPath: string | undefined;
-
-    if (isRepo) {
-      try {
-        // Create a worktree for this session - fully isolated, no checkout needed in main repo
-        workspacePath = await createWorktree(workspace.path, branchName);
-        originalRepoPath = workspace.path;
-        console.log(`[Git] Created worktree at ${workspacePath} for branch ${branchName}`);
-      } catch (error) {
-        console.error('Git worktree setup failed:', error);
-        // Fall back to using main repo path if worktree creation fails
-        workspacePath = workspace.path;
-      }
-    }
+    const workspacePath = workspace.path;
 
     // Generate a CLI session UUID for Claude only (Copilot generates its own)
     const selectedAgent = agent || 'claude';
     const cliSessionId = selectedAgent === 'claude' ? uuidv4() : undefined;
 
-    // Create session record with worktree path
-    const session = await createSessionStore(workspaceId, prompt, branchName, {
+    // Create session record — CLI tools manage their own git, no worktree needed
+    const session = await createSessionStore(workspaceId, prompt, '', {
       agent: selectedAgent,
       interactive: true,
       copilotSessionId: cliSessionId,
       workspacePath,
-      originalRepoPath,
     });
 
     // Start PTY session
@@ -112,6 +100,78 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     return { sessionId: session.id, interactive: true };
+  });
+
+  // ==================== CLI SESSION DISCOVERY ====================
+
+  // List discovered CLI sessions — always rescans for fresh results
+  app.get<{ Querystring: { limit?: string; offset?: string } }>('/api/cli-sessions', async (request) => {
+    const limit = parseInt(request.query.limit || '15', 10);
+    const offset = parseInt(request.query.offset || '0', 10);
+    invalidateCache();
+    return discoverAll(limit, offset);
+  });
+
+  // Force refresh CLI sessions (invalidate cache)
+  app.post('/api/cli-sessions/refresh', async () => {
+    invalidateCache();
+    return discoverAll(0, 0);
+  });
+
+  // Resume a CLI session (create RA session record + auto-create workspace)
+  app.post<{ Params: { id: string }; Body: ResumeCliSessionRequest }>('/api/cli-sessions/:id/resume', async (request, reply) => {
+    const { id, source, directory } = request.body;
+    const directoryName = directory.split(/[\\/]/).filter(Boolean).pop() || 'workspace';
+
+    // 1. Find or auto-create workspace for this directory
+    const config = getConfig();
+    let workspace = config.workspaces.find(ws => ws.path === directory);
+
+    if (!workspace) {
+      // Auto-create workspace
+      const newWorkspace = {
+        id: uuidv4(),
+        name: directoryName,
+        path: directory,
+      };
+      await addWorkspace(newWorkspace);
+      workspace = newWorkspace;
+    }
+
+    // 2. Check if an RA session already tracks this CLI session ID
+    const existingSessions = await listSessions();
+    for (const existing of existingSessions) {
+      const fullSession = await getSession(existing.id);
+      if (fullSession?.copilotSessionId === id) {
+        // Already tracked - return the existing RA session
+        invalidateCache();
+        return { sessionId: fullSession.id, workspaceId: fullSession.workspaceId };
+      }
+    }
+
+    // 3. Create a new RA session record
+    const session = await createSessionStore(workspace.id, '', '', {
+      agent: source,
+      interactive: true,
+      copilotSessionId: id, // CLI session UUID - used for --resume
+      workspacePath: directory,
+    });
+
+    // Set the friendly name from the CLI session info
+    // We need to discover the pretty name from the CLI session
+    try {
+      const discovered = await discoverAll(1000, 0);
+      const cliSession = discovered.sessions.find(s => s.id === id);
+      if (cliSession?.prettyName) {
+        session.friendlyName = cliSession.prettyName;
+        await saveSession(session);
+      }
+    } catch {
+      // Non-critical, skip
+    }
+
+    invalidateCache();
+    return { sessionId: session.id, workspaceId: workspace.id };
   });
 
   // ==================== INTERACTIVE SESSIONS (PTY) ====================
@@ -164,9 +224,18 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
 
     // Start PTY session in resume mode
     // PTY uses session.workspacePath which is already set to the worktree path
-    const ptySession = await startInteractiveSession(session, undefined, true);
+    let ptySession;
+    try {
+      ptySession = await startInteractiveSession(session, undefined, true);
+    } catch (err) {
+      console.error(`[API] PTY start failed for session ${sessionId}:`, err);
+      return reply.status(500).send({
+        error: 'Failed to resume interactive session',
+        details: err instanceof Error ? err.message : String(err),
+      });
+    }
     if (!ptySession) {
-      return reply.status(500).send({ error: 'Failed to resume interactive session' });
+      return reply.status(500).send({ error: 'Failed to resume interactive session (returned null)' });
     }
 
     // Mark session as interactive
