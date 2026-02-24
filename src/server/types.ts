@@ -254,3 +254,43 @@ export interface CloneWorkspaceRequest {
   name: string;
   targetPath?: string;
 }
+
+export interface HookNotificationRequest {
+  sessionId: string;        // Claude CLI session UUID
+  notificationType: string; // e.g., 'permission_prompt', 'idle_prompt'
+}
+
+// Push notification device types
+export interface DeviceSubscription {
+  id: string;
+  name: string;
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  subscribedAt: string;  // ISO 8601
+}
+
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  subscribedAt: string;
+}
+
+export interface SubscribeRequest {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  name?: string;
+}
+
+export interface UnsubscribeRequest {
+  endpoint: string;
+}
+
+export interface RenameDeviceRequest {
+  name: string;
+}

@@ -1,6 +1,7 @@
 import { useApp } from '../../context/AppContext';
 import { useNotifications } from '../../hooks/useNotifications';
 import { SessionList } from '../SessionList/SessionList';
+import { NotificationSettingsModal } from '../NotificationSettingsModal/NotificationSettingsModal';
 import './Sidebar.css';
 
 export function Sidebar() {
@@ -13,7 +14,16 @@ export function Sidebar() {
     cliSessionsLoading,
   } = useApp();
 
-  const { notificationsEnabled, isSubscribing, toggleNotifications } = useNotifications();
+  const {
+    notificationsEnabled,
+    isSubscribing,
+    subscribeError,
+    subscribe,
+    unsubscribe,
+    currentDeviceId,
+    showModal,
+    setShowModal,
+  } = useNotifications();
 
   const handleNewSession = () => {
     setCurrentView('new-session');
@@ -27,10 +37,10 @@ export function Sidebar() {
           <div className="header-status">
             <button
               className={`notification-toggle ${notificationsEnabled ? 'enabled' : ''} ${isSubscribing ? 'subscribing' : ''}`}
-              onClick={toggleNotifications}
-              disabled={isSubscribing || notificationsEnabled === null}
-              aria-label={notificationsEnabled ? 'Disable notifications' : 'Enable notifications'}
-              title={notificationsEnabled ? 'Notifications on' : 'Notifications off'}
+              onClick={() => setShowModal(true)}
+              disabled={isSubscribing}
+              aria-label="Notification settings"
+              title="Notification settings"
             >
               {notificationsEnabled ? '🔔' : '🔕'}
             </button>
@@ -69,6 +79,18 @@ export function Sidebar() {
         <div
           className="sidebar-overlay active"
           onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {showModal && (
+        <NotificationSettingsModal
+          onClose={() => setShowModal(false)}
+          notificationsEnabled={notificationsEnabled}
+          isSubscribing={isSubscribing}
+          subscribeError={subscribeError}
+          subscribe={subscribe}
+          unsubscribe={unsubscribe}
+          currentDeviceId={currentDeviceId}
         />
       )}
     </>

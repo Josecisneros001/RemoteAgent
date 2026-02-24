@@ -4,14 +4,15 @@ import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
 import { listSessions, getSession, saveSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
-import { addSubscription, getVapidPublicKey } from '../services/push.js';
+import { addSubscription, removeSubscription, getVapidPublicKey, listDevices, removeDevice, renameDevice, sendTestNotification } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
 import { syncImagesForRun } from '../services/image-watcher.js';
 import { getGitChanges, getAllDiffs, getFileDiff, cloneRepo, isGitRepo, isInsideGitRepo, initGitRepo, getCommitFiles, getCommitFileDiff, generateBranchName, createWorktree, getWorktreePath } from '../services/git.js';
-import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions } from '../services/pty-manager.js';
+import { startInteractiveSession, stopSession, isSessionActive, getActiveSessions, findPtySessionByCliSessionId, notifyInteractionNeeded } from '../services/pty-manager.js';
+import { ensureClaudeHookConfig } from '../services/claude-hooks.js';
 import { pathExists } from '../utils/fs.js';
 import { discoverAll, invalidateCache } from '../services/session-discovery.js';
-import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest, ResumeCliSessionRequest } from '../types.js';
+import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest, ResumeCliSessionRequest, HookNotificationRequest, SubscribeRequest, UnsubscribeRequest, RenameDeviceRequest } from '../types.js';
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ==================== CONFIG ====================
@@ -38,9 +39,82 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Subscribe to push notifications
-  app.post<{ Body: PushSubscription }>('/api/push/subscribe', async (request, reply) => {
-    const subscription = request.body;
-    await addSubscription(subscription);
+  app.post<{ Body: SubscribeRequest }>('/api/push/subscribe', async (request) => {
+    const { endpoint, keys, name } = request.body;
+    const device = await addSubscription(endpoint, keys, name);
+    return { success: true, device: { id: device.id, name: device.name, subscribedAt: device.subscribedAt } };
+  });
+
+  // Unsubscribe (server-side cleanup)
+  app.post<{ Body: UnsubscribeRequest }>('/api/push/unsubscribe', async (request) => {
+    const { endpoint } = request.body;
+    if (endpoint) await removeSubscription(endpoint);
+    return { success: true };
+  });
+
+  // List subscribed devices
+  app.get('/api/push/devices', async () => {
+    return { devices: listDevices() };
+  });
+
+  // Delete a device
+  app.delete<{ Params: { id: string } }>('/api/push/devices/:id', async (request, reply) => {
+    const removed = await removeDevice(request.params.id);
+    if (!removed) return reply.status(404).send({ error: 'Device not found' });
+    return { success: true };
+  });
+
+  // Rename a device
+  app.put<{ Params: { id: string }; Body: RenameDeviceRequest }>('/api/push/devices/:id', async (request, reply) => {
+    const { name } = request.body;
+    if (!name?.trim()) return reply.status(400).send({ error: 'Name is required' });
+    const renamed = await renameDevice(request.params.id, name.trim());
+    if (!renamed) return reply.status(404).send({ error: 'Device not found' });
+    return { success: true };
+  });
+
+  // Test notification to a specific device
+  app.post<{ Params: { id: string } }>('/api/push/devices/:id/test', async (request, reply) => {
+    const result = await sendTestNotification(request.params.id);
+    if (!result.success) {
+      return reply.status(400).send({ error: result.error || 'Failed to send test notification' });
+    }
+    return { success: true };
+  });
+
+  // ==================== HOOKS ====================
+
+  // Receive notification from Claude CLI hooks when interaction is needed
+  app.post<{ Body: HookNotificationRequest }>('/api/hook/notification', async (request, reply) => {
+    const { sessionId, notificationType } = request.body;
+
+    if (!sessionId || !notificationType) {
+      return reply.status(400).send({ error: 'sessionId and notificationType are required' });
+    }
+
+    // Only process interactive notification types — ignore informational ones like auth_success
+    const interactiveTypes = new Set(['permission_prompt', 'idle_prompt', 'elicitation_dialog']);
+    if (!interactiveTypes.has(notificationType)) {
+      return { success: true, ignored: true };
+    }
+
+    const result = await findPtySessionByCliSessionId(sessionId);
+    if (!result) {
+      return reply.status(404).send({ error: 'No active session found for this CLI session ID' });
+    }
+
+    const { ptySession, session } = result;
+
+    // Map notification type to human-readable reason
+    const reasonMap: Record<string, string> = {
+      'permission_prompt': 'Permission prompt',
+      'idle_prompt': 'Waiting for input',
+      'elicitation_dialog': 'Clarification needed',
+    };
+    const reason = reasonMap[notificationType] || notificationType;
+
+    await notifyInteractionNeeded(ptySession, session, reason);
+
     return { success: true };
   });
 
@@ -92,6 +166,17 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       copilotSessionId: cliSessionId,
       workspacePath,
     });
+
+    // Auto-configure Claude CLI hooks for interaction detection
+    if (selectedAgent === 'claude') {
+      try {
+        const config = getConfig();
+        await ensureClaudeHookConfig(workspacePath, config.port);
+      } catch (error) {
+        console.error('[Hooks] Failed to configure Claude hooks:', error);
+        // Non-fatal - continue without hooks, interaction detection will be degraded
+      }
+    }
 
     // Start PTY session
     const ptySession = await startInteractiveSession(session, prompt, false);
@@ -219,6 +304,16 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
           error: 'Failed to check workspace',
           details: error instanceof Error ? error.message : 'Unknown error'
         });
+      }
+    }
+
+    // Ensure Claude CLI hooks are configured (may have been lost if worktree was recreated)
+    if (session.agent === 'claude') {
+      try {
+        const config = getConfig();
+        await ensureClaudeHookConfig(session.workspacePath, config.port);
+      } catch (error) {
+        console.error('[Hooks] Failed to configure Claude hooks for resume:', error);
       }
     }
 

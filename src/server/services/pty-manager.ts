@@ -6,7 +6,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { sendNotification } from './push.js';
-import { updateSessionCopilotId } from './run-store.js';
+import { updateSessionCopilotId, getSession } from './run-store.js';
 import type { Session, WsPtyDataEvent, WsInteractionNeededEvent, WsPtyExitEvent } from '../types.js';
 
 // Combined regex pattern for interaction detection (single test instead of 14)
@@ -252,6 +252,9 @@ export async function startInteractiveSession(
     ptyProcess.onData((data: string) => {
       const now = Date.now();
       ptySession.lastOutputTime = now;
+      // Reset interaction flag on ANY output, including Claude sessions.
+      // This must stay outside the agent-type gate below so that hook-based
+      // notifications can fire again after the user responds and Claude produces new output.
       ptySession.isInteractionNotified = false;
 
       // For Claude resume: detect "No conversation found" error and retry with --session-id
@@ -315,13 +318,12 @@ export async function startInteractiveSession(
         }, OUTPUT_BATCH_INTERVAL_MS);
       }
 
-      // Check for interaction patterns (only on new data, not buffered)
-      checkForInteraction(ptySession, session, data);
-
-      // Reset idle timer only if not already set or if it's been a while
-      // This prevents constant timer churn during rapid output
-      if (!ptySession.idleTimer) {
-        resetIdleTimer(ptySession, session);
+      // Only use heuristic detection for non-Claude agents (Claude uses hooks)
+      if (session.agent !== 'claude') {
+        checkForInteraction(ptySession, session, data);
+        if (!ptySession.idleTimer) {
+          resetIdleTimer(ptySession, session);
+        }
       }
     });
 
@@ -743,7 +745,7 @@ function resetIdleTimer(ptySession: PtySession, session: Session): void {
   }, IDLE_THRESHOLD_MS);
 }
 
-async function notifyInteractionNeeded(ptySession: PtySession, session: Session, reason: string): Promise<void> {
+export async function notifyInteractionNeeded(ptySession: PtySession, session: Session, reason: string): Promise<void> {
   if (ptySession.isInteractionNotified) return;
   
   ptySession.isInteractionNotified = true;
@@ -763,6 +765,20 @@ async function notifyInteractionNeeded(ptySession: PtySession, session: Session,
     `${session.friendlyName}: ${reason}`,
     { sessionId: session.id }
   );
+}
+
+/**
+ * Find a PTY session by the Claude CLI session UUID (stored as copilotSessionId on the Session).
+ * The ptySessions Map is keyed by RemoteAgent's internal session ID, so we iterate to find a match.
+ */
+export async function findPtySessionByCliSessionId(cliSessionId: string): Promise<{ ptySession: PtySession, session: Session } | null> {
+  for (const [sessionId, ptySession] of ptySessions.entries()) {
+    const session = await getSession(sessionId);
+    if (session && session.copilotSessionId === cliSessionId) {
+      return { ptySession, session };
+    }
+  }
+  return null;
 }
 
 function cleanupSession(sessionId: string): void {

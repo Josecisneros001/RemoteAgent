@@ -123,6 +123,13 @@ export interface CliSessionsResponse {
   cacheTimestamp: string;
 }
 
+// Push notification device types
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  subscribedAt: string;
+}
+
 // View States
 export type ViewType = 'welcome' | 'new-session' | 'session';
 export type RunViewType = 'new-run' | 'run-detail' | 'empty';

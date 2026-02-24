@@ -1,4 +1,4 @@
-import type { Config, Session, Run, GitChanges, CommitFile, AgentType, CliSessionsResponse } from '../types';
+import type { Config, Session, Run, GitChanges, CommitFile, AgentType, CliSessionsResponse, DeviceInfo } from '../types';
 
 const API_BASE = '';
 
@@ -179,12 +179,56 @@ export async function fetchVapidKey(): Promise<{ publicKey: string }> {
   return res.json();
 }
 
-export async function subscribePush(subscription: PushSubscriptionJSON): Promise<void> {
-  await fetch(`${API_BASE}/api/push/subscribe`, {
+export async function subscribePush(subscription: PushSubscriptionJSON, name?: string): Promise<{ success: boolean; device: { id: string; name: string; subscribedAt: string } }> {
+  const res = await fetch(`${API_BASE}/api/push/subscribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(subscription),
+    body: JSON.stringify({ ...subscription, name }),
   });
+  if (!res.ok) throw new Error('Failed to subscribe');
+  return res.json();
+}
+
+export async function unsubscribePush(endpoint: string): Promise<void> {
+  await fetch(`${API_BASE}/api/push/unsubscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export async function fetchDevices(): Promise<{ devices: DeviceInfo[] }> {
+  const res = await fetch(`${API_BASE}/api/push/devices`);
+  if (!res.ok) throw new Error('Failed to fetch devices');
+  return res.json();
+}
+
+export async function deleteDevice(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/push/devices/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || 'Failed to delete device');
+  }
+}
+
+export async function renameDevice(id: string, name: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/push/devices/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || 'Failed to rename device');
+  }
+}
+
+export async function testDevice(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/push/devices/${id}/test`, { method: 'POST' });
+  if (!res.ok) {
+    const data = await res.json();
+    throw new Error(data.error || 'Failed to send test notification');
+  }
 }
 
 // ==================== CLI Session Discovery API ====================
