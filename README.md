@@ -17,11 +17,12 @@
 </p>
 
 <p align="center">
-  <a href="#-features">Features</a> |
-  <a href="#-quick-start">Quick Start</a> |
-  <a href="#-docker-deployment">Docker</a> |
-  <a href="#-remote-access">Remote Access</a> |
-  <a href="#-configuration">Configuration</a>
+  <a href="#features">Features</a> |
+  <a href="#prerequisites">Prerequisites</a> |
+  <a href="#quick-start">Quick Start</a> |
+  <a href="#docker-deployment">Docker</a> |
+  <a href="#remote-access">Remote Access</a> |
+  <a href="#configuration">Configuration</a>
 </p>
 
 <p align="center">
@@ -46,119 +47,284 @@
 | Feature | Description |
 |---------|-------------|
 | **Interactive Terminal** | Full PTY terminal in your browser - type commands, respond to prompts, see real-time output |
-| **Mobile-First PWA** | Designed for laptop, phones and tablets |
+| **Mobile-First PWA** | Designed for laptops, phones, and tablets |
 | **Session Persistence** | Stop and resume conversations anytime |
 | **Push Notifications** | Get notified when the agent needs input or finishes |
 | **Docker Sandboxing** | Network-filtered container with domain allowlisting |
-| **Multi-Agent** | Seamlessly switch between Claude Code / GitHub Copilot sessions |
+| **Multi-Agent** | Seamlessly switch between Claude Code and GitHub Copilot sessions |
+
+## Prerequisites
+
+Install only what you need based on how you plan to run RemoteAgent:
+
+### Node.js 18+ (required for native mode)
+
+Skip this if you're using Docker only.
+
+```bash
+# Check if already installed
+node --version   # Should print v18.x or higher
+
+# Install via nvm (recommended)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.0/install.sh | bash
+nvm install 20
+
+# Or download directly from https://nodejs.org
+```
+
+### Claude Code CLI
+
+Required if you want to use Claude as your AI agent.
+
+```bash
+npm install -g @anthropic-ai/claude-code
+
+# Authenticate (opens browser)
+claude
+# Then type: /login
+```
+
+You need a [Claude Pro, Max, or Team subscription](https://claude.ai/pricing), or an [Anthropic API key](https://console.anthropic.com/).
+
+See the [Claude Code documentation](https://docs.anthropic.com/en/docs/claude-code) for more details.
+
+### GitHub Copilot CLI
+
+Required if you want to use Copilot as your AI agent.
+
+```bash
+npm install -g @github/copilot
+
+# Authenticate
+copilot
+# Then type: /login
+```
+
+You need a [GitHub Copilot subscription](https://github.com/features/copilot).
+
+### Docker & Docker Compose (Docker mode only)
+
+Required only if you want to run RemoteAgent inside a container with network sandboxing.
+
+```bash
+# Check if already installed
+docker --version
+docker compose version
+
+# Install Docker Desktop (Windows/Mac): https://www.docker.com/products/docker-desktop
+# Install Docker Engine (Linux): https://docs.docker.com/engine/install/
+```
+
+### Microsoft Dev Tunnels (optional, for remote access)
+
+Only needed if you want to access RemoteAgent from your phone or another device outside your local network.
+
+```bash
+# Linux/macOS
+curl -sL https://aka.ms/DevTunnelCliInstall | bash
+
+# Windows
+winget install Microsoft.devtunnel
+
+# Authenticate with your GitHub or Microsoft account
+devtunnel user login -g
+```
 
 ## Quick Start
 
+### Native Mode
+
+Run RemoteAgent directly on your machine. Requires Node.js 18+ and at least one CLI agent installed.
+
 ```bash
-# Clone and install
+# 1. Clone the repository
 git clone https://github.com/josecisneros001/RemoteAgent.git
 cd RemoteAgent
-npm install && cd src/client && npm install && cd ../..
 
-# Configure (add your project paths)
-mkdir -p ~/.remote-agent
-cp config.example.json ~/.remote-agent/config.json
+# 2. Install dependencies
+npm install
+cd src/client && npm install && cd ../..
 
-# Run
+# 3. Start in development mode
 npm run dev
 ```
 
-Open **http://localhost:3000** - Select workspace - Choose agent - Start coding!
+Open **http://localhost:3000** in your browser. From there:
+1. Add a workspace (point it to a project directory on your machine)
+2. Create a new session - choose Claude or Copilot as the agent
+3. Type a prompt and start coding
 
-## Docker Setup
-
-For **secure sandboxed execution** with network filtering:
+For production use:
 
 ```bash
-cd docker
+npm run build
+npm start
+```
 
-# Edit docker-compose.yml to set your workspace path
-# Change: ~/your/projects/folder:/workspace
+### Docker Mode
 
-# Build and run (matches your host user for file permissions)
+Run RemoteAgent in a sandboxed container with network filtering. The container only allows outbound traffic to approved domains, preventing AI agents from accessing unauthorized resources.
+
+**Step 1: Clone and configure**
+
+```bash
+git clone https://github.com/josecisneros001/RemoteAgent.git
+cd RemoteAgent/docker
+```
+
+Edit `docker-compose.yml` to set your workspace path:
+
+```yaml
+volumes:
+  # Change this to your project directory
+  - ~/your/projects/folder:/workspace
+```
+
+**Step 2: Set up CLI authentication on your host**
+
+The container mounts your host CLI credentials so you don't need to re-authenticate inside Docker.
+
+For **Claude Code**, make sure you've run `claude` and authenticated on your host machine. The container reads from:
+- `~/.claude.json` (auth token)
+- `~/.claude/` (session data - mapped from `~/.claude-docker/` to avoid conflicts)
+- `~/.claude/settings.json` (auto-copied and adapted for Docker)
+
+For **GitHub Copilot**, authenticate on your host first. The container reads from:
+- `~/.copilot-docker/` (Copilot session data)
+- `~/.config/github-copilot/` (auth config)
+
+**Step 3: Build and run**
+
+```bash
+# Build and start the container (match your host user for file permissions)
 HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build
 ```
 
-### Network Security
+**Step 4: Verify**
 
-Docker mode provides DNS-based network filtering:
-
-- **Allowlisted domains only** - agents can only reach approved APIs
-- **Blocks SSH/FTP/SMTP** - prevents data exfiltration
-- **Hot-reload allowlist** - edit docker/allowlist.json without restart (requires admin/sudo)
+Open **http://localhost:3000** and create a session. Check the container logs if anything goes wrong:
 
 ```bash
-# Make allowlist editable only by admin (prevents AI from modifying it)
+docker compose logs -f
+```
+
+#### Docker Volume Reference
+
+| Volume Mount | Purpose |
+|---|---|
+| `~/your/projects/folder:/workspace` | Your project files (the AI agent works here) |
+| `./allowlist.json:/app/allowlist.json` | Allowed domains for network filtering (hot-reload) |
+| `~/.claude.json:/home/agent/.claude.json` | Claude Code authentication token |
+| `~/.claude-docker/:/home/agent/.claude/` | Claude Code session data |
+| `~/.claude/settings.json:/tmp/claude-settings.json:ro` | Claude settings (auto-adapted for Docker) |
+| `~/.copilot-docker:/home/agent/.copilot` | Copilot CLI session data |
+| `~/.config/github-copilot:/home/agent/.config/github-copilot` | Copilot authentication config |
+| `~/.remote-agent-docker:/home/agent/.remote-agent` | RemoteAgent data (sessions, config) |
+| `./logs:/var/log/dns` | DNS filter logs (optional, for debugging) |
+
+#### Network Filtering
+
+Docker mode uses DNS-based filtering to restrict outbound network access:
+
+- **dnsmasq** resolves only domains listed in `docker/allowlist.json`
+- **iptables** blocks external DNS, FTP, SSH, and SMTP traffic
+- HTTP and HTTPS traffic is allowed only to resolved (allowlisted) domains
+
+**Managing the allowlist:**
+
+```bash
+# Edit the allowlist (changes apply automatically via hot-reload)
+nano docker/allowlist.json
+```
+
+The default allowlist includes domains for Claude API, GitHub/Copilot API, common package registries (npm, PyPI, crates.io), and documentation sites.
+
+To secure the allowlist so the AI agent can't modify it:
+
+```bash
 sudo chown root:root docker/allowlist.json
 sudo chmod 644 docker/allowlist.json
 ```
 
+To disable network filtering entirely, set in `docker-compose.yml`:
+
+```yaml
+environment:
+  - ENABLE_NETWORK_FILTER=false
+```
+
 ## Remote Access
 
-Access RemoteAgent from your phone or any device:
+Access RemoteAgent from your phone or any device outside your local network.
 
 ### Microsoft Dev Tunnels (Recommended)
 
-Dev Tunnels provides **built-in authentication** — only you can access the tunnel using your Microsoft/GitHub account. No random URLs that anyone could stumble upon.
+Dev Tunnels provides **built-in authentication** - only you can access the tunnel using your Microsoft or GitHub account. The tunnel URL stays the same across restarts.
 
 ```bash
-# Install Dev Tunnels CLI
-curl -sL https://aka.ms/DevTunnelCliInstall | bash
+# Make sure you've authenticated (see Prerequisites)
+devtunnel user login -g
 
-# Login (uses your GitHub or Microsoft account)
-devtunnel user login
-
-# Start tunnel (use the included script)
+# Start the tunnel
+# Linux/macOS:
 npm run tunnel
+
+# Windows (PowerShell):
+.\scripts\tunnel.ps1
 ```
 
-The tunnel URL stays the same across restarts, and requires your account to access.
+The script creates a persistent tunnel named `remote-agent` on port 3000. On first run it creates the tunnel; subsequent runs reuse it with the same URL.
 
-### Other Options
-Cloudflare Tunnel / ngrok
+### Other Tunneling Services
 
+Any HTTPS tunneling service works with RemoteAgent. If you prefer [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), [ngrok](https://ngrok.com/), or another service, just point it at `localhost:3000`. Note that unlike Dev Tunnels, most alternatives require you to configure your own authentication to prevent unauthorized access.
 
 ## Configuration
 
-Config file: ~/.remote-agent/config.json
+RemoteAgent stores its configuration at `~/.remote-agent/config.json`. This file is created automatically on first run. Workspaces are typically managed through the UI, but you can also edit the file directly.
 
 ```json
 {
   "workspaces": [],
-  "defaultBrowsePath": "/home/user/projects",
+  "defaultBrowsePath": "~/",
   "port": 3000
 }
 ```
 
-| Option | Description |
-|--------|-------------|
-| defaultBrowsePath | Default folder when adding new workspaces |
-| port | Server port (default: 3000) |
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `workspaces` | Array | `[]` | Registered project directories. Each entry has `id`, `name`, and `path`. Typically managed through the UI. |
+| `defaultBrowsePath` | String | home directory | Default folder shown when browsing for new workspaces in the UI. |
+| `port` | Number | `3000` | Port the server listens on. |
 
-## Prerequisites
+> Push notification keys (`vapidPublicKey`, `vapidPrivateKey`) are auto-generated on first start — you never need to set these manually.
 
-**Required:**
-- Node.js 18+
-- One of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [GitHub Copilot CLI](https://githubnext.com/projects/copilot-cli)
+### Push Notifications
 
-**Install Claude Code:**
-```bash
-npm install -g @anthropic-ai/claude-code
-claude 
-  /login
-```
+RemoteAgent sends push notifications when the AI agent needs your input — so you can step away from the screen and get alerted on your phone or any subscribed device.
 
-**Install GitHub Copilot CLI:**
-```bash
-npm install -g @github/copilot
-copilot 
- /login
-```
+**How it works:**
+- **Claude sessions** use Claude CLI's built-in Notification hook for reliable detection (auto-configured per session)
+- **Copilot sessions** use idle-time heuristics (8 seconds of inactivity triggers a notification)
+
+**Setting up notifications:**
+1. Open RemoteAgent in your browser (on each device you want notifications on)
+2. Click the 🔔 bell icon in the sidebar to open Notification Settings
+3. Click **Subscribe** and allow notifications when prompted
+4. Your device is automatically named (e.g., "Chrome on Windows", "Safari on iOS")
+
+**Managing devices:**
+
+The Notification Settings modal lets you manage all subscribed devices:
+- **Test** — send a test notification to verify delivery
+- **Rename** — give devices friendly names
+- **Delete** — remove devices you no longer use
+
+Stale subscriptions (e.g., from a browser you uninstalled) are automatically cleaned up when push delivery fails.
+
+**iOS note:** On iOS, push notifications require installing RemoteAgent as a PWA first. Tap the Share button in Safari → **Add to Home Screen**, then open from the Home Screen and subscribe.
+
+**VAPID keys** are generated automatically on first server start — no manual setup needed.
 
 ## Project Structure
 
@@ -187,10 +353,10 @@ RemoteAgent/
 ## Development
 
 ```bash
-# Development with hot reload
+# Development with hot reload (server only)
 npm run dev
 
-# Watch both server and client
+# Watch both server and client with hot reload
 npm run watch
 
 # Production build
@@ -202,9 +368,9 @@ npm run build && npm start
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 1. Fork the repository
-2. Create your feature branch (git checkout -b feature/amazing-feature)
-3. Commit your changes (git commit -m 'Add amazing feature')
-4. Push to the branch (git push origin feature/amazing-feature)
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
 ## License
