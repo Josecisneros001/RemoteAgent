@@ -43,50 +43,17 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// Cache static assets
-const CACHE_NAME = 'remote-agent-v1';
-const STATIC_ASSETS = [
-  '/',
-];
-
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
-  );
+// No caching — skip waiting and claim clients immediately
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
+  // Clear any previously cached data
   event.waitUntil(
-    caches.keys().then((keys) => 
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    caches.keys().then((keys) =>
+      Promise.all(keys.map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
-});
-
-self.addEventListener('fetch', (event) => {
-  // Only cache GET requests
-  if (event.request.method !== 'GET') return;
-  
-  // Don't cache API calls or WebSocket
-  if (event.request.url.includes('/api/') || event.request.url.includes('/ws')) return;
-
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        // Cache successful responses
-        if (response.status === 200) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
-    }).catch(() => {
-      // Offline fallback
-      if (event.request.mode === 'navigate') {
-        return caches.match('/index.html');
-      }
-    })
-  );
 });
