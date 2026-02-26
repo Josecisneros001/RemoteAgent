@@ -7,12 +7,15 @@
   "scripts": {
     "build": "tsc && npm run build:client",
     "build:client": "cd src/client && npm run build",
+    "install:client": "cd src/client && npm install",
+    "install:all": "npm install && npm run install:client",
     "clean": "rm -rf dist",
     "dev": "tsx watch src/server/index.ts",
     "dev:client": "cd src/client && npm run dev",
     "watch": "concurrently -n server,client -c blue,magenta \"npm run dev\" \"npm run dev:client\"",
     "start": "node dist/server/index.js",
-    "tunnel": "./scripts/tunnel.sh"
+    "tunnel": "./scripts/tunnel.sh",
+    "tunnel:win": "powershell -ExecutionPolicy Bypass -File .\\scripts\\tunnel.ps1"
   },
   "dependencies": {
     "@fastify/static": "^8.0.0",
