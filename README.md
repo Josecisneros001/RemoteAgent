@@ -142,8 +142,7 @@ git clone https://github.com/josecisneros001/RemoteAgent.git
 cd RemoteAgent
 
 # 2. Install dependencies
-npm install
-cd src/client && npm install && cd ../..
+npm run install:all
 
 # 3. Start in development mode
 npm run dev
@@ -269,8 +268,8 @@ devtunnel user login -g
 # Linux/macOS:
 npm run tunnel
 
-# Windows (PowerShell):
-.\scripts\tunnel.ps1
+# Windows:
+npm run tunnel:win
 ```
 
 The script creates a persistent tunnel named `remote-agent` on port 3000. On first run it creates the tunnel; subsequent runs reuse it with the same URL.
