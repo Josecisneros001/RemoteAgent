@@ -145,7 +145,8 @@ async function main() {
     await app.listen({ port: config.port, host: '0.0.0.0' });
     console.log(`\n🚀 Remote Agent server running at http://localhost:${config.port}`);
     console.log(`📁 Config directory: ~/.remote-agent/`);
-    console.log(`\nTo expose to your phone, run: npm run tunnel`);
+    const tunnelCmd = process.platform === 'win32' ? 'npm run tunnel:win' : 'npm run tunnel';
+    console.log(`\nTo expose to your phone, run: ${tunnelCmd}`);
 
     // Graceful shutdown handling
     const shutdown = async (signal: string) => {
