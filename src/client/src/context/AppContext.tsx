@@ -299,11 +299,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadSessions, state.workspaceFilter]);
 
   // WebSocket setup — connects to the current machine's /ws endpoint
+  // Resilient: exponential backoff reconnect + ping/pong keepalive
   useEffect(() => {
     let cancelled = false;
+    let reconnectDelay = 1000; // Start at 1s, backs off to 30s max
+    let pingInterval: ReturnType<typeof setInterval> | null = null;
 
     const setupWebSocket = () => {
-      if (cancelled) return; // Prevent zombie reconnection after machine switch
+      if (cancelled) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsBase = api.getWsBase();
@@ -313,17 +316,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ws.onopen = () => {
         if (cancelled) { ws.close(); return; }
         setState(s => ({ ...s, connectionStatus: 'connected' }));
+        reconnectDelay = 1000; // Reset backoff on successful connect
+
+        // Keepalive: send ping every 25s to prevent tunnel/proxy idle timeout
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* ignore */ }
+          }
+        }, 25_000);
       };
 
       ws.onclose = () => {
-        if (cancelled) return; // Don't reconnect if effect was cleaned up
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        if (cancelled) return;
         setState(s => ({ ...s, connectionStatus: 'disconnected' }));
-        setTimeout(setupWebSocket, 3000);
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+        setTimeout(setupWebSocket, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
       };
 
       ws.onerror = () => {
         if (cancelled) return;
-        setState(s => ({ ...s, connectionStatus: 'disconnected' }));
+        // Don't set disconnected here — onclose will fire right after
       };
 
       ws.onmessage = (event) => {
