@@ -33,6 +33,7 @@ interface AppState {
   machines: Machine[];
   currentMachineId: string;
   machinesLoading: boolean;
+  machinesDiscovered: boolean;  // true after first successful discovery completes
 }
 
 interface AppContextType extends AppState {
@@ -78,6 +79,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     machines: [],
     currentMachineId: 'local',
     machinesLoading: false,
+    machinesDiscovered: false,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -169,10 +171,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, machinesLoading: true }));
     try {
       const data = await api.fetchMachines();
+      const hasRemote = data.machines.some((m: Machine) => !m.isLocal);
       setState(s => ({
         ...s,
         machines: data.machines,
         machinesLoading: false,
+        // Mark discovered once we get remote machines (not just the initial local-only response)
+        machinesDiscovered: s.machinesDiscovered || hasRemote,
       }));
     } catch (error) {
       console.error('Failed to load machines:', error);
@@ -188,6 +193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ...s,
         machines: data.machines,
         machinesLoading: false,
+        machinesDiscovered: true,
       }));
     } catch (error) {
       console.error('Failed to refresh machines:', error);

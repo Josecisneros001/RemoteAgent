@@ -10,6 +10,7 @@ export function MachineSelector() {
     machines,
     currentMachineId,
     machinesLoading,
+    machinesDiscovered,
     setCurrentMachine,
     refreshMachinesAction,
     loadMachines,
@@ -39,8 +40,11 @@ export function MachineSelector() {
     };
   }, [machines.length, loadMachines]);
 
-  // Don't render when there's only one (local) machine or no machines
-  if (machines.length <= 1) return null;
+  // Don't render if discovery completed and there's only one machine
+  // During initial discovery (not yet discovered), don't show anything yet
+  if (machinesDiscovered && machines.length <= 1) return null;
+  // Before discovery, don't show the selector — just let the user work locally
+  if (!machinesDiscovered && machines.length <= 1) return null;
 
   // Check if the currently active machine has gone offline
   const currentMachine = machines.find(m => m.id === currentMachineId);
@@ -102,6 +106,11 @@ export function MachineSelector() {
             <span className={`machine-status-dot ${machine.status}`} />
           </button>
         ))}
+        {!machinesDiscovered && machinesLoading && (
+          <span className="machine-discovering" title="Discovering other machines...">
+            Discovering...
+          </span>
+        )}
       </div>
       <button
         className={`machine-refresh-btn ${machinesLoading ? 'loading' : ''}`}

@@ -50,10 +50,8 @@ export async function proxyHttpRequest(
     return;
   }
 
-  if (machine.status === 'offline') {
-    reply.status(502).send({ error: `Machine "${machine.name}" is offline` });
-    return;
-  }
+  // Don't reject based on cached status — it may be stale.
+  // Let the actual connection attempt determine if the machine is reachable.
 
   if (!machine.tunnelUrl) {
     reply.status(502).send({ error: `Machine "${machine.name}" has no tunnel URL` });

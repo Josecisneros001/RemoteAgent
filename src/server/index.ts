@@ -176,8 +176,8 @@ async function main() {
       return;
     }
 
-    if (machine.status === 'offline' || !machine.tunnelUrl) {
-      socket.close(4003, 'Machine is offline');
+    if (!machine.tunnelUrl) {
+      socket.close(4003, 'Machine has no tunnel URL');
       return;
     }
 

@@ -164,6 +164,20 @@
   to { transform: rotate(360deg); }
 }
 
+.machine-discovering {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  padding: 6px 12px;
+  white-space: nowrap;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+
 /* Mobile: allow horizontal scroll, slightly smaller */
 @media (max-width: 767px) {
   .machine-selector {
