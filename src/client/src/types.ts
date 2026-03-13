@@ -91,8 +91,8 @@ export interface CommitFile {
 
 // WebSocket Event Types
 export interface WsEvent {
-  type: 'log' | 'phase' | 'validation' | 'image' | 'complete' | 'pty-data' | 'interaction-needed' | 'pty-exit';
-  sessionId: string;
+  type: 'log' | 'phase' | 'validation' | 'image' | 'complete' | 'pty-data' | 'interaction-needed' | 'pty-exit' | 'machines-updated';
+  sessionId?: string;
   runId?: string;
   phase?: 'prompt' | 'validation' | 'output';
   content?: string;

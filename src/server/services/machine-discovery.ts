@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { hostname, platform } from 'os';
 import { getConfig } from './config.js';
+import { broadcast } from './websocket.js';
 import type { Machine, IdentityResponse } from '../types.js';
 
 // Cache for discovered machines
@@ -288,8 +289,15 @@ export async function discoverMachines(): Promise<Machine[]> {
 
   // Only write to cache if this is still the latest discovery (prevents stale overwrite)
   if (gen === discoveryGeneration) {
+    const hadRemoteBefore = machineCache.some(m => !m.isLocal);
     machineCache = machines;
     cacheTimestamp = Date.now();
+
+    // Notify connected clients when remote machines are discovered (or list changes)
+    const hasRemoteNow = machines.some(m => !m.isLocal);
+    if (hasRemoteNow || hadRemoteBefore) {
+      broadcast({ type: 'machines-updated' });
+    }
   }
   return machines;
 }

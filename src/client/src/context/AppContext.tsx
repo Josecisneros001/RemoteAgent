@@ -339,6 +339,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Machine discovery completed — refresh machine list
+      if (event.type === 'machines-updated') {
+        loadMachines();
+        return;
+      }
+
       // Update views if applicable (debounced)
       if (event.sessionId === currentSessionIdRef.current) {
         if (event.runId && event.runId === currentRunIdRef.current) {
@@ -364,13 +370,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshSessions();
       }
 
-      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId) {
+      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId && event.sessionId) {
         setState(s => ({
           ...s,
           currentRunId: event.runId ?? null,
-          currentSessionId: event.sessionId,
+          currentSessionId: event.sessionId!,
         }));
-        loadSessionDetail(event.sessionId);
+        loadSessionDetail(event.sessionId!);
       }
     };
 
@@ -388,15 +394,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(sessionRunsDebounceRef.current);
       }
     };
-  }, [state.currentMachineId, loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
+  }, [state.currentMachineId, loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions, loadMachines]);
 
-  // Initial data load — load machines, then re-fetch after a short delay
-  // so background discovery results appear quickly without blocking first paint
+  // Initial data load — machines update automatically via WebSocket 'machines-updated' event
   useEffect(() => {
     loadMachines();
-    // Re-fetch after 5s to pick up background discovery results
-    const timer = setTimeout(() => loadMachines(), 5000);
-    return () => clearTimeout(timer);
   }, [loadMachines]);
 
   const value: AppContextType = {

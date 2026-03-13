@@ -229,7 +229,11 @@ export interface WsPtyAckEvent {
   bytes: number;  // Number of bytes acknowledged by client
 }
 
-export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent | WsPtyAckEvent;
+export interface WsMachinesUpdatedEvent {
+  type: 'machines-updated';
+}
+
+export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent | WsPtyAckEvent | WsMachinesUpdatedEvent;
 
 // Push subscription
 export interface PushSubscription {
