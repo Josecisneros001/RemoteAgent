@@ -390,9 +390,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [state.currentMachineId, loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
 
-  // Initial data load — load machines in addition to sessions
+  // Initial data load — load machines, then re-fetch after a short delay
+  // so background discovery results appear quickly without blocking first paint
   useEffect(() => {
     loadMachines();
+    // Re-fetch after 5s to pick up background discovery results
+    const timer = setTimeout(() => loadMachines(), 5000);
+    return () => clearTimeout(timer);
   }, [loadMachines]);
 
   const value: AppContextType = {

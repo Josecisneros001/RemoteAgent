@@ -295,32 +295,50 @@ export async function discoverMachines(): Promise<Machine[]> {
 }
 
 /**
- * Get cached machines (returns cache if still valid, otherwise re-discovers with dedup lock)
+ * Get cached machines — returns immediately (never blocks the caller).
+ * If cache is empty, returns local machine instantly and triggers background discovery.
+ * If cache is stale, returns stale cache and triggers background refresh.
  */
 export async function getCachedMachines(): Promise<Machine[]> {
+  // Cache is fresh — return immediately
   if (machineCache.length > 0 && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
     return machineCache;
   }
-  // Deduplicate concurrent discovery requests
+
+  // Kick off background discovery (deduplicated)
   if (!discoveryInProgress) {
     const thisDiscovery = discoverMachines().finally(() => {
-      // Only clear if this is still the current discovery (prevents race with refreshMachines)
       if (discoveryInProgress === thisDiscovery) {
         discoveryInProgress = null;
       }
     });
     discoveryInProgress = thisDiscovery;
   }
-  return discoveryInProgress;
+
+  // Return what we have NOW — don't wait for discovery
+  // First call: return just the local machine so the UI is usable immediately
+  // Subsequent calls with stale cache: return stale cache (will be updated in background)
+  if (machineCache.length > 0) {
+    return machineCache;
+  }
+  return [getLocalMachine()];
 }
 
 /**
- * Force refresh — invalidates cache and re-discovers (uses dedup lock)
+ * Force refresh — invalidates cache, runs discovery, and waits for result.
+ * This is the only call that blocks until discovery completes (used by POST /api/machines/refresh).
  */
 export async function refreshMachines(): Promise<Machine[]> {
   cacheTimestamp = 0;
-  discoveryInProgress = null; // Discard any stale in-flight reference
-  return getCachedMachines();
+  discoveryInProgress = null;
+  // Start fresh discovery
+  const thisDiscovery = discoverMachines().finally(() => {
+    if (discoveryInProgress === thisDiscovery) {
+      discoveryInProgress = null;
+    }
+  });
+  discoveryInProgress = thisDiscovery;
+  return thisDiscovery;
 }
 
 /**
