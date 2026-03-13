@@ -1,8 +1,9 @@
 // Machine management types
 export interface Machine {
-  id: string;                    // Unique machine ID (hash of hostname + platform)
-  name: string;                  // Display name (hostname)
+  id: string;                    // Unique machine ID (derived from tunnel name)
+  name: string;                  // Display name (machineName from config)
   tunnelUrl: string;             // DevTunnel URL for remote access
+  tunnelId?: string;             // DevTunnel tunnel ID (for token generation)
   status: 'online' | 'offline';
   isLocal: boolean;              // True for the hub machine itself
   lastSeen: string;              // ISO 8601 timestamp

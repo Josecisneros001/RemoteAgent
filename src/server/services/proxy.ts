@@ -1,5 +1,5 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
-import { getMachine } from './machine-discovery.js';
+import { getMachine, getTunnelToken } from './machine-discovery.js';
 
 const PROXY_TIMEOUT_MS = 30_000; // 30 second timeout
 const MAX_RESPONSE_SIZE = 50 * 1024 * 1024; // 50MB response body limit
@@ -111,6 +111,14 @@ export async function proxyHttpRequest(
         headers[key] = value;
       } else if (Array.isArray(value)) {
         headers[key] = value.join(', ');
+      }
+    }
+
+    // Inject tunnel access token for devtunnel auth (server-to-server, no browser cookies)
+    if (machine.tunnelId) {
+      const token = getTunnelToken(machine.tunnelId);
+      if (token) {
+        headers['x-tunnel-authorization'] = `tunnel ${token}`;
       }
     }
 

@@ -12,6 +12,10 @@ let discoveryInProgress: Promise<Machine[]> | null = null;
 let discoveryGeneration = 0; // Prevents stale discovery from overwriting newer results
 const CACHE_TTL_MS = 30_000; // 30 seconds
 
+// Tunnel access token cache: tunnelId -> { token, expiresAt }
+const tunnelTokenCache = new Map<string, { token: string; expiresAt: number }>();
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60 * 1000; // Refresh 5 minutes before expiry
+
 // Health check interval
 let healthInterval: ReturnType<typeof setInterval> | null = null;
 const HEALTH_CHECK_INTERVAL_MS = 30_000; // 30 seconds
@@ -85,6 +89,37 @@ function resolveDevtunnelCommand(): string {
     // devtunnel not installed
   }
   return 'devtunnel';
+}
+
+/**
+ * Get an access token for a tunnel (for server-to-server proxy calls).
+ * Tokens are cached and refreshed before expiry.
+ */
+export function getTunnelToken(tunnelId: string): string | null {
+  // Check cache first
+  const cached = tunnelTokenCache.get(tunnelId);
+  if (cached && cached.expiresAt > Date.now() + TOKEN_REFRESH_MARGIN_MS) {
+    return cached.token;
+  }
+
+  try {
+    const devtunnelCmd = resolveDevtunnelCommand();
+    const output = execFileSync(devtunnelCmd, ['token', tunnelId, '--scopes', 'connect', '--json'], {
+      encoding: 'utf-8',
+      timeout: 10_000,
+    });
+    const json = JSON.parse(output);
+    if (json.token) {
+      // Parse expiration (format: "2026-03-14 03:38:03 UTC")
+      const expiresAt = json.expiration ? new Date(json.expiration).getTime() : Date.now() + 23 * 60 * 60 * 1000;
+      tunnelTokenCache.set(tunnelId, { token: json.token, expiresAt });
+      console.log(`[Discovery] Generated access token for tunnel ${tunnelId}`);
+      return json.token;
+    }
+  } catch (err: any) {
+    console.warn(`[Discovery] Failed to generate token for tunnel ${tunnelId}: ${err.message?.substring(0, 80)}`);
+  }
+  return null;
 }
 
 /**
@@ -257,6 +292,7 @@ export async function discoverMachines(): Promise<Machine[]> {
         id: machineIdFromTunnel,
         name: machineIdFromTunnel,
         tunnelUrl: tunnel.url,
+        tunnelId: tunnel.tunnelId,
         status: 'online',
         isLocal: false,
         lastSeen: new Date().toISOString(),

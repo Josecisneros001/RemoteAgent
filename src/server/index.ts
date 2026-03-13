@@ -8,7 +8,7 @@ import { initPush } from './services/push.js';
 import { addClient } from './services/websocket.js';
 import { registerRoutes } from './routes/api.js';
 import { attachClient, detachClient, sendInput, resizePty, isSessionActive, stopAllSessions, handleClientAck } from './services/pty-manager.js';
-import { getMachine, stopHealthMonitoring } from './services/machine-discovery.js';
+import { getMachine, stopHealthMonitoring, getTunnelToken } from './services/machine-discovery.js';
 import { pathExists } from './utils/fs.js';
 import type { WsPtyInputEvent, WsPtyResizeEvent, WsPtyAckEvent } from './types.js';
 import WebSocketClient from 'ws';
@@ -201,8 +201,18 @@ async function main() {
 
     let remoteWs: WebSocketClient;
     try {
+      // Build WS headers with tunnel access token for auth
+      const wsHeaders: Record<string, string> = {};
+      if (machine.tunnelId) {
+        const token = getTunnelToken(machine.tunnelId);
+        if (token) {
+          wsHeaders['x-tunnel-authorization'] = `tunnel ${token}`;
+        }
+      }
+
       remoteWs = new WebSocketClient(remoteUrl, {
         handshakeTimeout: 10_000,
+        headers: wsHeaders,
       });
     } catch (err: any) {
       console.error(`[WS Proxy] Failed to create remote connection:`, err.message);
