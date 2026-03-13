@@ -134,10 +134,12 @@ EOF
     HOST_IP=$(getent ahosts host.docker.internal 2>/dev/null | awk '/STREAM/ {print $1; exit}')
     if [ -n "$HOST_IP" ] && [ "$HOST_IP" != "127.0.0.1" ]; then
         # Redirect TCP connections from agent user to 127.0.0.1 → host.docker.internal IP
-        # Excludes port 53 (DNS) and 3000 (RemoteAgent itself) which must stay local
-        iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner $AGENT_UID \
-            -d 127.0.0.1 ! --dport 53 ! --dport 3000 \
-            -j DNAT --to-destination "$HOST_IP"
+        # Skip port 53 (DNS stays local for dnsmasq) and 3000 (RemoteAgent runs in container)
+        iptables -t nat -N LOCALHOST_REDIRECT 2>/dev/null || true
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp --dport 53 -j RETURN
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp --dport 3000 -j RETURN
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp -j DNAT --to-destination "$HOST_IP"
+        iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner $AGENT_UID -d 127.0.0.1 -j LOCALHOST_REDIRECT
         echo "  [+] localhost redirect: 127.0.0.1 → $HOST_IP (host.docker.internal)"
     fi
 
