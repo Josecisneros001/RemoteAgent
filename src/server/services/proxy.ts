@@ -179,9 +179,11 @@ export async function proxyHttpRequest(
     // Now that body is fully buffered and validated, set status + headers + send
     reply.status(response.status);
 
-    // Forward response headers (strip hop-by-hop and set-cookie to prevent cookie injection)
+    // Forward response headers (strip hop-by-hop, set-cookie, and content-encoding
+    // since fetch() auto-decompresses gzip/brotli — forwarding the header would cause
+    // the browser to try decompressing the already-decompressed body → ERR_CONTENT_DECODING_FAILED)
     for (const [key, value] of response.headers.entries()) {
-      if (['connection', 'keep-alive', 'transfer-encoding', 'set-cookie'].includes(key.toLowerCase())) {
+      if (['connection', 'keep-alive', 'transfer-encoding', 'set-cookie', 'content-encoding', 'content-length'].includes(key.toLowerCase())) {
         continue;
       }
       reply.header(key, value);
