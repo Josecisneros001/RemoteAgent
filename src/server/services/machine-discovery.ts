@@ -247,7 +247,6 @@ async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
   // Step 2: Get URLs for active tunnels via `devtunnel show --json` (parallel)
   const tunnelPromises = tunnelsToResolve.map(async (entry) => {
     const id = entry.tunnelId!.split('.')[0];
-    const hostConns = entry.hostConnections ?? 0;
     try {
       const result = await execFileAsync(devtunnelCmd, ['show', id, '--json'], {
         encoding: 'utf-8',
@@ -257,6 +256,8 @@ async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
       const tunnel = showJson?.tunnel;
       if (!tunnel) return [];
 
+      // Use hostConnections from show (more current than list snapshot)
+      const hostConns = tunnel.hostConnections ?? entry.hostConnections ?? 0;
       const ports = tunnel.ports || [];
       const infos: TunnelInfo[] = [];
       for (const port of ports) {
@@ -355,10 +356,13 @@ export async function discoverMachines(): Promise<Machine[]> {
       if (tunnel.hostConnections <= 0) {
         // Not currently hosting — check grace period
         const lastOnline = cached?.lastSeen ? new Date(cached.lastSeen).getTime() : 0;
-        if (Date.now() - lastOnline > OFFLINE_GRACE_MS) {
+        const elapsed = Date.now() - lastOnline;
+        if (elapsed > OFFLINE_GRACE_MS) {
           status = 'offline';
+          console.log(`[Discovery] ${machineIdFromTunnel}: hostConns=0, grace expired (${Math.round(elapsed/1000)}s ago) → offline`);
+        } else {
+          console.log(`[Discovery] ${machineIdFromTunnel}: hostConns=0, within grace (${Math.round(elapsed/1000)}s ago) → keeping online`);
         }
-        // Otherwise keep it "online" within grace period (transient blip)
       }
 
       const machine: Machine = {
@@ -408,6 +412,10 @@ export async function discoverMachines(): Promise<Machine[]> {
     // Only broadcast if the machine list actually changed (prevents UI flicker)
     const prevSummary = machineCache.map(m => `${m.id}:${m.status}`).sort().join(',');
     const newSummary = machines.map(m => `${m.id}:${m.status}`).sort().join(',');
+
+    if (prevSummary !== newSummary) {
+      console.log(`[Discovery] Machine list changed: [${prevSummary}] → [${newSummary}]`);
+    }
 
     machineCache = machines;
     cacheTimestamp = Date.now();
@@ -475,7 +483,10 @@ export async function getMachine(id: string): Promise<Machine | undefined> {
 }
 
 /**
- * Start the background health monitoring loop
+ * Start the background health monitoring loop.
+ * Note: For devtunnel-based machines, health is determined by discovery
+ * (hostConnections count), not HTTP identity checks (which require tunnel auth tokens).
+ * This health check only runs for machines with direct (non-tunnel) URLs.
  */
 export function startHealthMonitoring(): void {
   if (healthInterval) return;
@@ -485,10 +496,14 @@ export function startHealthMonitoring(): void {
 
     // Capture the current cache reference — only mutate if it hasn't been swapped by discoverMachines()
     const cacheRef = machineCache;
-    const remoteMachines = cacheRef.filter(m => !m.isLocal && m.tunnelUrl);
+    // Skip devtunnel machines — their status is managed by discovery via hostConnections.
+    // HTTP identity checks would fail due to tunnel auth wall.
+    const directMachines = cacheRef.filter(m => !m.isLocal && m.tunnelUrl && !m.tunnelId);
+
+    if (directMachines.length === 0) return;
 
     await Promise.all(
-      remoteMachines.map(async (machine) => {
+      directMachines.map(async (machine) => {
         const identity = await checkIdentity(machine.tunnelUrl);
 
         // Only update if the cache hasn't been replaced by a concurrent discovery
