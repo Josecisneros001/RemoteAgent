@@ -48,6 +48,17 @@ export function getLocalMachine(): Machine {
  * Resolve devtunnel command path (reuses pattern from pty-manager.ts)
  */
 function resolveDevtunnelCommand(): string {
+  // Check common install locations first (Docker installs to /root/bin/)
+  const knownPaths = ['/root/bin/devtunnel', '/usr/local/bin/devtunnel'];
+  for (const p of knownPaths) {
+    try {
+      execFileSync(p, ['--version'], { encoding: 'utf-8', timeout: 5000, stdio: 'ignore' });
+      return p;
+    } catch {
+      // not at this path
+    }
+  }
+
   try {
     const isWindows = process.platform === 'win32';
     const result = execFileSync(
@@ -70,16 +81,19 @@ function resolveDevtunnelCommand(): string {
 }
 
 /**
- * Parse `devtunnel list` output to extract tunnel URLs
- * Output format varies but typically contains tunnel IDs and URLs
+ * Parse `devtunnel list` output to extract tunnel URLs.
+ * Tries JSON format first (`--json`), falls back to text parsing.
  */
 export function parseDevtunnelList(output: string): string[] {
   const urls: string[] = [];
+
+  // Try JSON parse first (from `devtunnel list --json` — has no URLs, only tunnel IDs)
+  // Fall back to text parsing for URLs in output
   const lines = output.split(/\r?\n/);
 
   for (const line of lines) {
     // Match URLs that look like devtunnel URLs (e.g., https://xxx.devtunnels.ms/)
-    const urlMatch = line.match(/(https?:\/\/[^\s]+\.devtunnels\.ms[^\s]*)/i);
+    const urlMatch = line.match(/(https?:\/\/[^\s"]+\.devtunnels\.ms[^\s"]*)/i);
     if (urlMatch) {
       // Clean the URL - remove trailing slashes
       const url = urlMatch[1].replace(/\/+$/, '');
@@ -88,6 +102,79 @@ export function parseDevtunnelList(output: string): string[] {
   }
 
   return [...new Set(urls)]; // Deduplicate
+}
+
+/**
+ * Info about a discovered tunnel from `devtunnel show --json`
+ */
+interface TunnelInfo {
+  tunnelId: string;
+  url: string;
+  hostConnections: number;
+}
+
+/**
+ * Get tunnel IDs from `devtunnel list --json`, then resolve URLs via `devtunnel show --json`.
+ * Returns tunnel info including URL, host connection count, and tunnel ID.
+ */
+function discoverTunnels(devtunnelCmd: string): TunnelInfo[] {
+  // Step 1: Get tunnel IDs via JSON list
+  let listOutput: string;
+  try {
+    listOutput = execFileSync(devtunnelCmd, ['list', '--json'], {
+      encoding: 'utf-8',
+      timeout: 15_000,
+    });
+  } catch (err: any) {
+    console.warn(`[Discovery] devtunnel list failed: ${err.message?.substring(0, 80)}`);
+    return [];
+  }
+
+  let tunnelIds: string[];
+  try {
+    const json = JSON.parse(listOutput);
+    tunnelIds = (json.tunnels || []).map((t: { tunnelId?: string }) => t.tunnelId).filter(Boolean);
+  } catch {
+    console.warn('[Discovery] Failed to parse devtunnel list JSON');
+    return [];
+  }
+
+  if (tunnelIds.length === 0) {
+    console.log('[Discovery] No tunnels found in devtunnel list');
+    return [];
+  }
+  console.log(`[Discovery] Found ${tunnelIds.length} tunnel(s), resolving details...`);
+
+  // Step 2: Get details for each tunnel via `devtunnel show --json`
+  const tunnels: TunnelInfo[] = [];
+  for (const tunnelId of tunnelIds) {
+    const id = tunnelId.split('.')[0];
+    try {
+      const showOutput = execFileSync(devtunnelCmd, ['show', id, '--json'], {
+        encoding: 'utf-8',
+        timeout: 10_000,
+      });
+      const showJson = JSON.parse(showOutput);
+      const tunnel = showJson?.tunnel;
+      if (!tunnel) continue;
+
+      const hostConns = tunnel.hostConnections ?? 0;
+      const ports = tunnel.ports || [];
+      for (const port of ports) {
+        if (port.portUri && port.portNumber === 3000) {
+          tunnels.push({
+            tunnelId: id,
+            url: port.portUri.replace(/\/+$/, ''),
+            hostConnections: hostConns,
+          });
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[Discovery] Failed to get details for tunnel ${id}: ${err.message?.substring(0, 80)}`);
+    }
+  }
+
+  return tunnels;
 }
 
 /**
@@ -130,74 +217,48 @@ export async function checkIdentity(url: string): Promise<IdentityResponse | nul
 export async function discoverMachines(): Promise<Machine[]> {
   const gen = ++discoveryGeneration;
   const localMachine = getLocalMachine();
-  const localMachineId = getLocalMachineId();
   const machines: Machine[] = [localMachine];
 
   try {
     const devtunnelCmd = resolveDevtunnelCommand();
 
-    // Run devtunnel list to get tunnel URLs
-    let output: string;
-    try {
-      output = execFileSync(devtunnelCmd, ['list'], {
-        encoding: 'utf-8',
-        timeout: 15_000,
-        env: { ...process.env },
-      });
-    } catch (err: any) {
-      // devtunnel might not be installed, or not authenticated
-      if (err.stderr?.includes('not logged in') || err.stderr?.includes('not authenticated')) {
-        console.log('[Discovery] DevTunnel not authenticated, skipping remote discovery');
-      } else if (err.code === 'ENOENT') {
-        console.log('[Discovery] DevTunnel CLI not found, skipping remote discovery');
-      } else {
-        console.warn('[Discovery] Failed to list tunnels:', err.message);
-      }
-      if (gen === discoveryGeneration) {
-        machineCache = machines;
-        cacheTimestamp = Date.now();
-      }
-      return machines;
-    }
+    // Discover tunnels via devtunnel CLI (no HTTP calls needed — uses CLI JSON output)
+    const tunnels = discoverTunnels(devtunnelCmd);
+    console.log(`[Discovery] Found ${tunnels.length} tunnel(s) with port 3000`);
 
-    const tunnelUrls = parseDevtunnelList(output);
-    console.log(`[Discovery] Found ${tunnelUrls.length} tunnel URL(s)`);
+    for (const tunnel of tunnels) {
+      // Derive a machine ID from the tunnel ID (e.g., "remote-agent-abc123" -> "abc123")
+      // This avoids needing HTTP identity checks which require tunnel auth
+      const machineIdFromTunnel = tunnel.tunnelId.replace(/^remote-agent-/, '');
 
-    // Health-check each tunnel URL in parallel
-    const identityChecks = tunnelUrls.map(async (url) => {
-      const identity = await checkIdentity(url);
-      if (!identity) return null;
+      // Skip if this looks like our own tunnel
+      if (machineIdFromTunnel === hostname().toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
 
-      // Skip if this is the local machine
-      if (identity.machineId === localMachineId) return null;
+      // Determine status from host connections
+      const status = tunnel.hostConnections > 0 ? 'online' : 'offline';
 
       const machine: Machine = {
-        id: identity.machineId,
-        name: identity.hostname,
-        tunnelUrl: url,
-        status: 'online',
+        id: machineIdFromTunnel,
+        name: machineIdFromTunnel, // Container/host ID — will be updated if we can reach identity endpoint
+        tunnelUrl: tunnel.url,
+        status: status as 'online' | 'offline',
         isLocal: false,
         lastSeen: new Date().toISOString(),
         machineInfo: {
-          hostname: identity.hostname,
-          platform: identity.platform,
-          version: identity.version,
+          hostname: machineIdFromTunnel,
+          platform: 'unknown',
+          version: 'unknown',
         },
       };
-      return machine;
-    });
 
-    const results = await Promise.all(identityChecks);
-    for (const machine of results) {
-      if (machine) {
-        // Merge with existing cache to preserve lastSeen for machines that went offline
-        const cached = machineCache.find(m => m.id === machine.id);
-        if (cached && cached.status === 'offline') {
-          // Machine came back online
-          machine.lastSeen = new Date().toISOString();
-        }
-        machines.push(machine);
+      // Merge with existing cache to preserve richer info from previous identity checks
+      const cached = machineCache.find(m => m.id === machine.id);
+      if (cached) {
+        machine.name = cached.name;
+        machine.machineInfo = cached.machineInfo || machine.machineInfo;
       }
+
+      machines.push(machine);
     }
 
     // Check for machines that were previously online but not found this time

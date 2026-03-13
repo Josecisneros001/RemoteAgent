@@ -30,6 +30,9 @@ services:
 
       # RemoteAgent data (sessions, runs, config)
       - ~/.remote-agent-docker:/home/agent/.remote-agent
+
+      # DevTunnel auth tokens (shared with tunnel sidecar for machine discovery)
+      - tunnel-auth:/app/DevTunnels
     environment:
       - NODE_ENV=production
       - DOCKER_MODE=true
@@ -119,6 +122,8 @@ services:
           echo "Creating tunnel: $$TUNNEL_NAME"
           devtunnel create "$$TUNNEL_NAME"
           devtunnel port create "$$TUNNEL_NAME" -p 3000
+          # Allow anonymous access so other RemoteAgent instances can discover this machine
+          devtunnel access create "$$TUNNEL_NAME" -a
         fi
 
         echo "Hosting tunnel..."

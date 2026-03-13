@@ -4,6 +4,16 @@ set -e
 echo "=== RemoteAgent Docker Container ==="
 echo "Starting..."
 
+# Ensure devtunnel CLI is accessible to agent user (installed under /root/bin)
+if [ -f /root/bin/devtunnel ]; then
+  chmod 755 /root /root/bin /root/bin/devtunnel 2>/dev/null || true
+fi
+
+# Ensure devtunnel auth tokens are readable by agent user (shared volume at /app/DevTunnels)
+if [ -d /app/DevTunnels ]; then
+  chown -R agent:agent /app/DevTunnels 2>/dev/null || true
+fi
+
 # Increase file descriptor limits
 ulimit -n 65536 2>/dev/null || true
 
