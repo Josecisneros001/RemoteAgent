@@ -300,23 +300,77 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, currentRunId: runId }));
   }, []);
 
-  const refreshSessions = useCallback(async () => {
-    await loadSessions(state.workspaceFilter || undefined);
-  }, [loadSessions, state.workspaceFilter]);
+  const workspaceFilterRef = useRef(state.workspaceFilter);
+  useEffect(() => { workspaceFilterRef.current = state.workspaceFilter; }, [state.workspaceFilter]);
 
-  // WebSocket setup — connects to the current machine's /ws endpoint
-  // Resilient: exponential backoff reconnect + ping/pong keepalive
+  const refreshSessions = useCallback(async () => {
+    await loadSessions(workspaceFilterRef.current || undefined);
+  }, [loadSessions]);
+
+  // WebSocket event handler — stored in ref so WS effect has stable deps (WS-4)
+  const handleWsEventRef = useRef<(event: WsEvent) => void>(() => {});
+  handleWsEventRef.current = (event: WsEvent) => {
+    // Skip PTY events in main handler - they're handled separately in the terminal component
+    if (event.type === 'pty-data' || event.type === 'interaction-needed' || event.type === 'pty-exit') {
+      return;
+    }
+
+    // Machine discovery completed — refresh machine list
+    if (event.type === 'machines-updated') {
+      loadMachines();
+      return;
+    }
+
+    // Update views if applicable (debounced)
+    if (event.sessionId === currentSessionIdRef.current) {
+      if (event.runId && event.runId === currentRunIdRef.current) {
+        if (runDetailDebounceRef.current) {
+          clearTimeout(runDetailDebounceRef.current);
+        }
+        runDetailDebounceRef.current = setTimeout(() => {
+          if (event.runId) {
+            loadRunDetail(event.runId);
+          }
+        }, DEBOUNCE_DELAY);
+      } else {
+        if (sessionRunsDebounceRef.current) {
+          clearTimeout(sessionRunsDebounceRef.current);
+        }
+        sessionRunsDebounceRef.current = setTimeout(() => {
+          loadSessionRuns(currentSessionIdRef.current!);
+        }, DEBOUNCE_DELAY);
+      }
+    }
+
+    if (event.type === 'complete') {
+      refreshSessions();
+    }
+
+    if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId && event.sessionId) {
+      setState(s => ({
+        ...s,
+        currentRunId: event.runId ?? null,
+        currentSessionId: event.sessionId!,
+      }));
+      loadSessionDetail(event.sessionId!);
+    }
+  };
+
+  // WebSocket setup — always connects to the LOCAL server's /ws endpoint
+  // This is for push notifications, session updates, machine discovery events.
+  // Terminal WS connections go through the proxy separately (in InteractiveTerminal).
+  // Effect has NO dependencies — connects once and stays stable (WS-4).
   useEffect(() => {
     let cancelled = false;
-    let reconnectDelay = 1000; // Start at 1s, backs off to 30s max
+    let reconnectDelay = 1000;
     let pingInterval: ReturnType<typeof setInterval> | null = null;
 
     const setupWebSocket = () => {
       if (cancelled) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsBase = api.getWsBase();
-      const ws = new WebSocket(`${protocol}//${window.location.host}${wsBase}/ws`);
+      // Always connect to local /ws — never proxy the broadcast WebSocket
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -348,56 +402,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       ws.onmessage = (event) => {
         if (cancelled) return;
-        const data: WsEvent = JSON.parse(event.data);
-        handleWsEvent(data);
+        try {
+          const data: WsEvent = JSON.parse(event.data);
+          handleWsEventRef.current(data);
+        } catch { /* ignore malformed messages */ }
       };
-    };
-
-    const handleWsEvent = (event: WsEvent) => {
-      // Skip PTY events in main handler - they're handled separately in the terminal component
-      if (event.type === 'pty-data' || event.type === 'interaction-needed' || event.type === 'pty-exit') {
-        return;
-      }
-
-      // Machine discovery completed — refresh machine list
-      if (event.type === 'machines-updated') {
-        loadMachines();
-        return;
-      }
-
-      // Update views if applicable (debounced)
-      if (event.sessionId === currentSessionIdRef.current) {
-        if (event.runId && event.runId === currentRunIdRef.current) {
-          if (runDetailDebounceRef.current) {
-            clearTimeout(runDetailDebounceRef.current);
-          }
-          runDetailDebounceRef.current = setTimeout(() => {
-            if (event.runId) {
-              loadRunDetail(event.runId);
-            }
-          }, DEBOUNCE_DELAY);
-        } else {
-          if (sessionRunsDebounceRef.current) {
-            clearTimeout(sessionRunsDebounceRef.current);
-          }
-          sessionRunsDebounceRef.current = setTimeout(() => {
-            loadSessionRuns(currentSessionIdRef.current!);
-          }, DEBOUNCE_DELAY);
-        }
-      }
-
-      if (event.type === 'complete') {
-        refreshSessions();
-      }
-
-      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId && event.sessionId) {
-        setState(s => ({
-          ...s,
-          currentRunId: event.runId ?? null,
-          currentSessionId: event.sessionId!,
-        }));
-        loadSessionDetail(event.sessionId!);
-      }
     };
 
     setupWebSocket();
@@ -414,7 +423,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(sessionRunsDebounceRef.current);
       }
     };
-  }, [state.currentMachineId, loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions, loadMachines]);
+  }, []); // Empty deps — WS connects once, handler ref keeps it current
 
   // Initial data load — machines update automatically via WebSocket 'machines-updated' event
   useEffect(() => {

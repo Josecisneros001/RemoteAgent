@@ -204,10 +204,12 @@ async function main() {
       // Build WS headers with tunnel access token for auth
       const wsHeaders: Record<string, string> = {};
       if (machine.tunnelId) {
-        const token = getTunnelToken(machine.tunnelId);
-        if (token) {
-          wsHeaders['x-tunnel-authorization'] = `tunnel ${token}`;
+        const token = await getTunnelToken(machine.tunnelId);
+        if (!token) {
+          socket.close(4008, 'Unable to authenticate with remote tunnel');
+          return;
         }
+        wsHeaders['x-tunnel-authorization'] = `tunnel ${token}`;
       }
 
       remoteWs = new WebSocketClient(remoteUrl, {

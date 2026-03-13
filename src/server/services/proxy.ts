@@ -90,10 +90,10 @@ export async function proxyHttpRequest(
   }
 
   const targetUrl = `${machine.tunnelUrl}${targetPath}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
 
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
 
     // Build headers — forward most headers but strip sensitive and hop-by-hop ones
     const headers: Record<string, string> = {};
@@ -114,10 +114,12 @@ export async function proxyHttpRequest(
 
     // Inject tunnel access token for devtunnel auth (server-to-server, no browser cookies)
     if (machine.tunnelId) {
-      const token = getTunnelToken(machine.tunnelId);
-      if (token) {
-        headers['x-tunnel-authorization'] = `tunnel ${token}`;
+      const token = await getTunnelToken(machine.tunnelId);
+      if (!token) {
+        reply.status(502).send({ error: `Unable to authenticate with tunnel for machine "${machine.name}"` });
+        return;
       }
+      headers['x-tunnel-authorization'] = `tunnel ${token}`;
     }
 
     // Forward the request
@@ -143,7 +145,8 @@ export async function proxyHttpRequest(
     }
 
     const response = await fetch(targetUrl, fetchOptions);
-    clearTimeout(timeout);
+    // Don't clearTimeout here — keep it active through body buffering
+    // so slow-drip responses also trigger the timeout
 
     // Buffer response body FIRST (before setting reply status/headers)
     // This ensures we can still send a clean 502 if the body exceeds the size limit
@@ -175,6 +178,7 @@ export async function proxyHttpRequest(
     }
 
     // Now that body is fully buffered and validated, set status + headers + send
+    clearTimeout(timeout);
     reply.status(response.status);
 
     // Forward response headers (strip hop-by-hop, set-cookie, and content-encoding
@@ -192,6 +196,7 @@ export async function proxyHttpRequest(
 
     reply.send(responseBody ?? '');
   } catch (err: any) {
+    clearTimeout(timeout);
     if (err.name === 'AbortError') {
       reply.status(504).send({ error: `Proxy timeout: remote machine did not respond within ${PROXY_TIMEOUT_MS / 1000}s` });
     } else if (err.code === 'ECONNREFUSED' || err.cause?.code === 'ECONNREFUSED') {

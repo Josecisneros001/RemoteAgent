@@ -1,9 +1,12 @@
-import { execFileSync } from 'child_process';
+import { execFileSync, execFile } from 'child_process';
+import { promisify } from 'util';
 import { createHash } from 'crypto';
 import { hostname, platform } from 'os';
 import { getConfig, getMachineName } from './config.js';
 import { broadcast } from './websocket.js';
 import type { Machine, IdentityResponse } from '../types.js';
+
+const execFileAsync = promisify(execFile);
 
 // Cache for discovered machines
 let machineCache: Machine[] = [];
@@ -56,14 +59,19 @@ export function getLocalMachine(): Machine {
 }
 
 /**
- * Resolve devtunnel command path (reuses pattern from pty-manager.ts)
+ * Resolve devtunnel command path (cached after first resolution)
  */
+let cachedDevtunnelCmd: string | null = null;
+
 function resolveDevtunnelCommand(): string {
+  if (cachedDevtunnelCmd) return cachedDevtunnelCmd;
+
   // Check common install locations first (Docker installs to /root/bin/)
   const knownPaths = ['/root/bin/devtunnel', '/usr/local/bin/devtunnel'];
   for (const p of knownPaths) {
     try {
       execFileSync(p, ['--version'], { encoding: 'utf-8', timeout: 5000, stdio: 'ignore' });
+      cachedDevtunnelCmd = p;
       return p;
     } catch {
       // not at this path
@@ -81,10 +89,10 @@ function resolveDevtunnelCommand(): string {
 
     if (isWindows) {
       const cmdOrExe = lines.find(l => /\.(cmd|exe)$/i.test(l));
-      if (cmdOrExe) return cmdOrExe;
+      if (cmdOrExe) { cachedDevtunnelCmd = cmdOrExe; return cmdOrExe; }
     }
 
-    if (lines[0]) return lines[0];
+    if (lines[0]) { cachedDevtunnelCmd = lines[0]; return lines[0]; }
   } catch {
     // devtunnel not installed
   }
@@ -92,34 +100,59 @@ function resolveDevtunnelCommand(): string {
 }
 
 /**
- * Get an access token for a tunnel (for server-to-server proxy calls).
+ * Get an access token for a tunnel (async, non-blocking).
  * Tokens are cached and refreshed before expiry.
+ * Falls back to stale-but-not-expired token when refresh fails.
+ * Deduplicates concurrent requests for the same tunnel.
  */
-export function getTunnelToken(tunnelId: string): string | null {
-  // Check cache first
+const tokenInFlight = new Map<string, Promise<string | null>>();
+
+export async function getTunnelToken(tunnelId: string): Promise<string | null> {
+  // Check cache first — return immediately if fresh
   const cached = tunnelTokenCache.get(tunnelId);
   if (cached && cached.expiresAt > Date.now() + TOKEN_REFRESH_MARGIN_MS) {
     return cached.token;
   }
 
-  try {
-    const devtunnelCmd = resolveDevtunnelCommand();
-    const output = execFileSync(devtunnelCmd, ['token', tunnelId, '--scopes', 'connect', '--json'], {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    });
-    const json = JSON.parse(output);
-    if (json.token) {
-      // Parse expiration (format: "2026-03-14 03:38:03 UTC")
-      const expiresAt = json.expiration ? new Date(json.expiration).getTime() : Date.now() + 23 * 60 * 60 * 1000;
-      tunnelTokenCache.set(tunnelId, { token: json.token, expiresAt });
-      console.log(`[Discovery] Generated access token for tunnel ${tunnelId}`);
-      return json.token;
+  // Deduplicate concurrent requests for the same tunnel
+  const existing = tokenInFlight.get(tunnelId);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<string | null> => {
+    try {
+      const devtunnelCmd = resolveDevtunnelCommand();
+      const { stdout } = await execFileAsync(devtunnelCmd, ['token', tunnelId, '--scopes', 'connect', '--json'], {
+        encoding: 'utf-8',
+        timeout: 10_000,
+      });
+      const json = JSON.parse(stdout);
+      if (json.token) {
+        // Parse expiration with NaN guard
+        let expiresAt = Date.now() + 23 * 60 * 60 * 1000; // Default: 23 hours
+        if (json.expiration) {
+          const parsed = new Date(json.expiration).getTime();
+          if (!isNaN(parsed)) expiresAt = parsed;
+        }
+        tunnelTokenCache.set(tunnelId, { token: json.token, expiresAt });
+        console.log(`[Discovery] Generated access token for tunnel ${tunnelId}`);
+        return json.token;
+      }
+    } catch (err: any) {
+      console.warn(`[Discovery] Failed to generate token for tunnel ${tunnelId}: ${err.message?.substring(0, 80)}`);
     }
-  } catch (err: any) {
-    console.warn(`[Discovery] Failed to generate token for tunnel ${tunnelId}: ${err.message?.substring(0, 80)}`);
-  }
-  return null;
+
+    // Fall back to stale-but-not-expired cached token
+    if (cached && cached.expiresAt > Date.now()) {
+      console.log(`[Discovery] Using near-expiry cached token for ${tunnelId}`);
+      return cached.token;
+    }
+
+    return null;
+  })();
+
+  tokenInFlight.set(tunnelId, promise);
+  promise.finally(() => tokenInFlight.delete(tunnelId));
+  return promise;
 }
 
 /**
