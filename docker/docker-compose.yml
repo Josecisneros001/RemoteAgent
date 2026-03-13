@@ -100,10 +100,6 @@ services:
           exit 1
         fi
 
-        # Derive tunnel name from hostname (matches scripts/tunnel.sh logic)
-        HOST_ID=$$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-$$//')
-        TUNNEL_NAME="$${TUNNEL_NAME:-remote-agent-$$HOST_ID}"
-
         echo "Waiting for remote-agent to be ready..."
         TRIES=0
         until curl -sf http://localhost:3000/api/identity >/dev/null 2>&1; do
@@ -115,6 +111,13 @@ services:
           sleep 1
         done
 
+        # Get persistent tunnel name from app config (survives container recreation)
+        TUNNEL_NAME=$$(curl -sf http://localhost:3000/api/tunnel-name | grep -o '"tunnelName":"[^"]*"' | cut -d'"' -f4)
+        if [ -z "$$TUNNEL_NAME" ]; then
+          echo "ERROR: Failed to get tunnel name from app config."
+          exit 1
+        fi
+
         echo "Starting tunnel '$$TUNNEL_NAME' on port 3000..."
 
         # Create tunnel if it doesn't exist
@@ -122,8 +125,6 @@ services:
           echo "Creating tunnel: $$TUNNEL_NAME"
           devtunnel create "$$TUNNEL_NAME"
           devtunnel port create "$$TUNNEL_NAME" -p 3000
-          # Allow anonymous access so other RemoteAgent instances can discover this machine
-          devtunnel access create "$$TUNNEL_NAME" -a
         fi
 
         echo "Hosting tunnel..."
@@ -133,7 +134,6 @@ services:
       # devtunnel CLI stores tokens in ./DevTunnels/ relative to WORKDIR (/app)
       - tunnel-auth:/app/DevTunnels
     environment:
-      - TUNNEL_NAME=${TUNNEL_NAME:-}
       - PATH=/root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - HOME=/root
     depends_on:

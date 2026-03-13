@@ -1,5 +1,5 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { homedir } from 'os';
+import { homedir, hostname } from 'os';
 import { join } from 'path';
 import { pathExists } from '../utils/fs.js';
 import type { Config, WorkspaceConfig } from '../types.js';
@@ -91,4 +91,22 @@ export async function addWorkspace(workspace: WorkspaceConfig): Promise<void> {
 
 export function getConfigDir(): string {
   return CONFIG_DIR;
+}
+
+/**
+ * Get the persistent tunnel name from config.
+ * Auto-generates and saves one on first call (remote-agent-<hostname>).
+ */
+export async function getTunnelName(): Promise<string> {
+  const config = getConfig();
+  if (config.tunnelName) return config.tunnelName;
+
+  // Generate from hostname (same logic as scripts/tunnel.sh)
+  const hostId = hostname().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
+  const tunnelName = `remote-agent-${hostId}`;
+
+  // Persist so it survives container recreation
+  await updateConfig({ tunnelName });
+  console.log(`[Config] Generated tunnel name: ${tunnelName}`);
+  return tunnelName;
 }

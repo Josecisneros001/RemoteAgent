@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { hostname, platform } from 'os';
+import { getConfig } from './config.js';
 import type { Machine, IdentityResponse } from '../types.js';
 
 // Cache for discovered machines
@@ -226,22 +227,31 @@ export async function discoverMachines(): Promise<Machine[]> {
     const tunnels = discoverTunnels(devtunnelCmd);
     console.log(`[Discovery] Found ${tunnels.length} tunnel(s) with port 3000`);
 
+    // Get our own tunnel name from config to skip ourselves in discovery
+    let ownTunnelName: string | undefined;
+    try {
+      ownTunnelName = getConfig().tunnelName;
+    } catch {
+      // Config not loaded yet — fall back to hostname matching
+    }
+
     for (const tunnel of tunnels) {
+      // Only show tunnels that are actively hosted (skip disconnected/stale tunnels)
+      if (tunnel.hostConnections <= 0) continue;
+
       // Derive a machine ID from the tunnel ID (e.g., "remote-agent-abc123" -> "abc123")
-      // This avoids needing HTTP identity checks which require tunnel auth
       const machineIdFromTunnel = tunnel.tunnelId.replace(/^remote-agent-/, '');
 
-      // Skip if this looks like our own tunnel
-      if (machineIdFromTunnel === hostname().toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
-
-      // Determine status from host connections
-      const status = tunnel.hostConnections > 0 ? 'online' : 'offline';
+      // Skip if this is our own tunnel
+      if (ownTunnelName && tunnel.tunnelId === ownTunnelName) continue;
+      // Fallback: skip if tunnel ID matches our hostname pattern
+      if (!ownTunnelName && machineIdFromTunnel === hostname().toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
 
       const machine: Machine = {
         id: machineIdFromTunnel,
-        name: machineIdFromTunnel, // Container/host ID — will be updated if we can reach identity endpoint
+        name: machineIdFromTunnel,
         tunnelUrl: tunnel.url,
-        status: status as 'online' | 'offline',
+        status: 'online',
         isLocal: false,
         lastSeen: new Date().toISOString(),
         machineInfo: {

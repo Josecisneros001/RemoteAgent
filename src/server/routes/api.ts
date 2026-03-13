@@ -4,7 +4,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { hostname, platform } from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
+import { getConfig, getWorkspace, addWorkspace, getTunnelName } from '../services/config.js';
 import { listSessions, getSession, saveSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
 import { addSubscription, removeSubscription, getVapidPublicKey, listDevices, removeDevice, renameDevice, sendTestNotification } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
@@ -60,6 +60,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       platform: plat,
       machineId,
     };
+  });
+
+  // Get persistent tunnel name (auto-generates and saves to config on first call)
+  app.get('/api/tunnel-name', async () => {
+    const name = await getTunnelName();
+    return { tunnelName: name };
   });
 
   // ==================== MACHINES (Multi-Machine Management) ====================
