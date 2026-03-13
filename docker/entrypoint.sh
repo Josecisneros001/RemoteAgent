@@ -133,6 +133,10 @@ EOF
     # MCP servers and APIs running on the host are reachable without modifying settings.
     HOST_IP=$(getent ahosts host.docker.internal 2>/dev/null | awk '/STREAM/ {print $1; exit}')
     if [ -n "$HOST_IP" ] && [ "$HOST_IP" != "127.0.0.1" ]; then
+        # Enable routing of 127.0.0.0/8 packets to non-loopback interfaces (required for DNAT)
+        sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true
+        sysctl -w net.ipv4.conf.eth0.route_localnet=1 >/dev/null 2>&1 || true
+
         # Redirect TCP connections from agent user to 127.0.0.1 → host.docker.internal IP
         # Skip port 53 (DNS stays local for dnsmasq) and 3000 (RemoteAgent runs in container)
         iptables -t nat -N LOCALHOST_REDIRECT 2>/dev/null || true
