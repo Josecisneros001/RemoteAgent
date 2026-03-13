@@ -98,7 +98,7 @@ export function MachineSelector() {
           >
             <span className="machine-icon">{getPlatformIcon(machine.machineInfo?.platform)}</span>
             <span className="machine-name">{machine.name}</span>
-            {machine.isLocal && <span className="machine-local-tag">(local)</span>}
+            {machine.isLocal && <span className="machine-local-tag">(current)</span>}
             <span className={`machine-status-dot ${machine.status}`} />
           </button>
         ))}
