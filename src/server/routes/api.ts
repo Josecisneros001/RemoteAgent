@@ -242,7 +242,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Start PTY session
-    const ptySession = await startInteractiveSession(session, prompt, false);
+    let ptySession;
+    try {
+      ptySession = await startInteractiveSession(session, prompt, false);
+    } catch (err) {
+      return reply.status(400).send({
+        error: err instanceof Error ? err.message : 'Failed to start interactive session',
+      });
+    }
     if (!ptySession) {
       return reply.status(500).send({ error: 'Failed to start interactive session' });
     }
@@ -387,9 +394,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       ptySession = await startInteractiveSession(session, undefined, true);
     } catch (err) {
       console.error(`[API] PTY start failed for session ${sessionId}:`, err);
-      return reply.status(500).send({
-        error: 'Failed to resume interactive session',
-        details: err instanceof Error ? err.message : String(err),
+      return reply.status(400).send({
+        error: err instanceof Error ? err.message : 'Failed to resume interactive session',
       });
     }
     if (!ptySession) {

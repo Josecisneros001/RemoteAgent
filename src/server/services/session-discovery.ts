@@ -56,22 +56,11 @@ async function decodeClaudeProjectPath(encoded: string): Promise<string | null> 
   if (windowsMatch) {
     const drive = windowsMatch[1].toUpperCase();
     const rest = windowsMatch[2];
-
-    // On Linux/Docker, Windows drive mounts may be at /<lowercase drive>/
-    // (e.g., Q:\src → /q/src when mounted as /q:/q in Docker)
-    const isLinux = sep === '/';
-    const prefix = isLinux ? `/${drive.toLowerCase()}/` : `${drive}:${sep}`;
+    const prefix = `${drive}:${sep}`;
 
     // Try naive decode first (fastest path)
     const naive = prefix + rest.replace(/-/g, sep);
     if (await pathExists(naive)) return naive;
-
-    // If on Linux, also try the original Windows-style path (in case of different mount)
-    if (isLinux) {
-      const winPrefix = `${drive}:${sep}`;
-      const winNaive = winPrefix + rest.replace(/-/g, sep);
-      if (await pathExists(winNaive)) return winNaive;
-    }
 
     // Try smart decode — find valid path by testing filesystem
     const segments = rest.split('-');

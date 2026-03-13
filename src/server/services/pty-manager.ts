@@ -134,20 +134,20 @@ export async function startInteractiveSession(
   // Use the session's workspacePath which may be a worktree path
   const workingDir = session.workspacePath;
   if (!workingDir) {
-    console.error(`[PTY] No workspace path for session: ${session.id}`);
-    return null;
+    throw new Error('No workspace path configured for this session');
   }
 
   // Verify directory exists before spawning PTY
   try {
     const dirStat = await stat(workingDir);
     if (!dirStat.isDirectory()) {
-      console.error(`[PTY] Workspace path is not a directory: ${workingDir}`);
-      return null;
+      throw new Error(`Workspace path is not a directory: ${workingDir}`);
     }
-  } catch (e) {
-    console.error(`[PTY] Workspace directory does not exist: ${workingDir}`, e);
-    return null;
+  } catch (e: any) {
+    if (e.code === 'ENOENT') {
+      throw new Error(`Directory not available on this machine: ${workingDir}`);
+    }
+    throw e;
   }
 
   let command: string;

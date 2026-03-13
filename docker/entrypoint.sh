@@ -14,27 +14,6 @@ if [ -d /app/DevTunnels ]; then
   chown -R agent:agent /app/DevTunnels 2>/dev/null || true
 fi
 
-# Create symlinks for Windows-encoded Claude project dirs → Linux-encoded equivalents.
-# Sessions created on Windows host are stored under Q--engsys (Windows encoding),
-# but Claude CLI on Linux looks for -q-engsys (Linux encoding).
-# Symlinks let Claude find and resume sessions created on the Windows host.
-CLAUDE_PROJECTS="/home/$AGENT_USER/.claude/projects"
-if [ -d "$CLAUDE_PROJECTS" ]; then
-  for dir in "$CLAUDE_PROJECTS"/[A-Z]--*; do
-    [ -d "$dir" ] || continue
-    dirname=$(basename "$dir")
-    # Extract drive letter and rest: Q--engsys → q, engsys
-    drive=$(echo "$dirname" | head -c1 | tr '[:upper:]' '[:lower:]')
-    rest=$(echo "$dirname" | sed 's/^.--//')
-    # Linux-encoded equivalent: -q-engsys
-    linux_name="-${drive}-${rest}"
-    linux_path="$CLAUDE_PROJECTS/$linux_name"
-    if [ ! -e "$linux_path" ]; then
-      ln -s "$dir" "$linux_path" 2>/dev/null || true
-    fi
-  done
-fi
-
 # Increase file descriptor limits
 ulimit -n 65536 2>/dev/null || true
 
