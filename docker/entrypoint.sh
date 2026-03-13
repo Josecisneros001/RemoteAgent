@@ -48,12 +48,6 @@ echo "Running as user: $AGENT_USER (UID=$AGENT_UID, GID=$AGENT_GID)"
 # Create home directories if they don't exist
 mkdir -p /home/$AGENT_USER/.claude /home/$AGENT_USER/.copilot /home/$AGENT_USER/.remote-agent/sessions /home/$AGENT_USER/.remote-agent/runs /home/$AGENT_USER/.config
 
-# Copy and modify Claude settings.json for Docker environment
-# Replace localhost with host.docker.internal so container can reach host services
-if [ -f "/tmp/claude-settings.json" ]; then
-    echo "Copying Claude settings.json (localhost -> host.docker.internal)..."
-    sed 's/localhost/host.docker.internal/g' /tmp/claude-settings.json > /home/$AGENT_USER/.claude/settings.json
-fi
 
 # Ensure proper ownership of home directory and all subdirectories
 # This is important for mounted volumes that may have root ownership
@@ -133,6 +127,19 @@ EOF
     iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner $AGENT_UID -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner $AGENT_UID -j ACCEPT
     echo "  [+] HTTP/HTTPS: allowed (DNS-filtered)"
+
+    # Redirect localhost → host.docker.internal for the agent user.
+    # This makes Claude's settings.json "localhost" URLs work transparently —
+    # MCP servers and APIs running on the host are reachable without modifying settings.
+    HOST_IP=$(getent ahosts host.docker.internal 2>/dev/null | awk '/STREAM/ {print $1; exit}')
+    if [ -n "$HOST_IP" ] && [ "$HOST_IP" != "127.0.0.1" ]; then
+        # Redirect TCP connections from agent user to 127.0.0.1 → host.docker.internal IP
+        # Excludes port 53 (DNS) and 3000 (RemoteAgent itself) which must stay local
+        iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner $AGENT_UID \
+            -d 127.0.0.1 ! --dport 53 ! --dport 3000 \
+            -j DNAT --to-destination "$HOST_IP"
+        echo "  [+] localhost redirect: 127.0.0.1 → $HOST_IP (host.docker.internal)"
+    fi
 
     # Allow any port to host.docker.internal (for local development APIs)
     # Use the IP from /etc/hosts (set by docker-compose extra_hosts) or fallback to gateway
