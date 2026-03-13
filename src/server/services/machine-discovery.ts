@@ -195,7 +195,7 @@ interface TunnelInfo {
  * Fully async — does not block the event loop.
  */
 async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
-  // Step 1: Get tunnel IDs via JSON list
+  // Step 1: Get tunnel list with hostConnections (available in list --json)
   let listOutput: string;
   try {
     const result = await execFileAsync(devtunnelCmd, ['list', '--json'], {
@@ -208,24 +208,46 @@ async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
     return [];
   }
 
-  let tunnelIds: string[];
+  interface TunnelListEntry {
+    tunnelId?: string;
+    hostConnections?: number;
+    portCount?: number;
+  }
+
+  let tunnelEntries: TunnelListEntry[];
   try {
     const json = JSON.parse(listOutput);
-    tunnelIds = (json.tunnels || []).map((t: { tunnelId?: string }) => t.tunnelId).filter(Boolean);
+    tunnelEntries = json.tunnels || [];
   } catch {
     console.warn('[Discovery] Failed to parse devtunnel list JSON');
     return [];
   }
 
-  if (tunnelIds.length === 0) {
-    console.log('[Discovery] No tunnels found in devtunnel list');
+  // Filter: only resolve details for tunnels with active host connections AND ports
+  // This avoids expensive `show` calls for stale/disconnected tunnels
+  const activeTunnels = tunnelEntries.filter(t =>
+    t.tunnelId && (t.hostConnections ?? 0) > 0 && (t.portCount ?? 0) > 0
+  );
+
+  // Also include tunnels that are in the current cache (grace period handling)
+  const cachedIds = new Set(machineCache.filter(m => !m.isLocal).map(m => m.tunnelId).filter(Boolean));
+  const tunnelsToResolve = tunnelEntries.filter(t =>
+    t.tunnelId && (
+      (t.hostConnections ?? 0) > 0 ||
+      cachedIds.has(t.tunnelId.split('.')[0])
+    )
+  );
+
+  if (tunnelsToResolve.length === 0) {
+    console.log(`[Discovery] No active tunnels (${tunnelEntries.length} total, 0 hosting)`);
     return [];
   }
-  console.log(`[Discovery] Found ${tunnelIds.length} tunnel(s), resolving details...`);
+  console.log(`[Discovery] ${activeTunnels.length} active of ${tunnelEntries.length} total, resolving ${tunnelsToResolve.length} details...`);
 
-  // Step 2: Get details for each tunnel via `devtunnel show --json` (parallel)
-  const tunnelPromises = tunnelIds.map(async (tunnelId) => {
-    const id = tunnelId.split('.')[0];
+  // Step 2: Get URLs for active tunnels via `devtunnel show --json` (parallel)
+  const tunnelPromises = tunnelsToResolve.map(async (entry) => {
+    const id = entry.tunnelId!.split('.')[0];
+    const hostConns = entry.hostConnections ?? 0;
     try {
       const result = await execFileAsync(devtunnelCmd, ['show', id, '--json'], {
         encoding: 'utf-8',
@@ -235,7 +257,6 @@ async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
       const tunnel = showJson?.tunnel;
       if (!tunnel) return [];
 
-      const hostConns = tunnel.hostConnections ?? 0;
       const ports = tunnel.ports || [];
       const infos: TunnelInfo[] = [];
       for (const port of ports) {
