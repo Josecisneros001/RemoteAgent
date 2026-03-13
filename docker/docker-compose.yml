@@ -43,6 +43,9 @@ services:
     cap_add:
       # Required for iptables firewall rules
       - NET_ADMIN
+    sysctls:
+      # Required for localhost → host.docker.internal DNAT redirect
+      - net.ipv4.conf.all.route_localnet=1
     extra_hosts:
       # Allow container to access host machine services (e.g., local API on port 4000)
       - "host.docker.internal:host-gateway"
