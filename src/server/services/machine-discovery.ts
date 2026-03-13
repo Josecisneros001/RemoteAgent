@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { hostname, platform } from 'os';
-import { getConfig } from './config.js';
+import { getConfig, getMachineName } from './config.js';
 import { broadcast } from './websocket.js';
 import type { Machine, IdentityResponse } from '../types.js';
 
@@ -30,16 +30,21 @@ export function getLocalMachineId(): string {
  * Get the local machine as a Machine object
  */
 export function getLocalMachine(): Machine {
-  const host = hostname();
+  let name: string;
+  try {
+    name = getMachineName();
+  } catch {
+    name = hostname(); // Config not loaded yet
+  }
   return {
     id: 'local',
-    name: host,
+    name,
     tunnelUrl: '',
     status: 'online',
     isLocal: true,
     lastSeen: new Date().toISOString(),
     machineInfo: {
-      hostname: host,
+      hostname: hostname(),
       platform: platform(),
       version: '1.0.0',
     },

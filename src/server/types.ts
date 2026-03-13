@@ -33,7 +33,8 @@ export interface Config {
   workspaces: WorkspaceConfig[];
   defaultBrowsePath?: string;     // Default path for workspace browser
   port: number;
-  tunnelName?: string;            // Persistent devtunnel name (auto-generated if not set)
+  machineName?: string;           // Friendly name for this machine (used in tunnel name + UI tabs)
+  tunnelName?: string;            // Persistent devtunnel name (auto-generated from machineName)
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidEmail?: string;

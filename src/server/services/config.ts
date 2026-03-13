@@ -95,18 +95,31 @@ export function getConfigDir(): string {
 
 /**
  * Get the persistent tunnel name from config.
- * Auto-generates and saves one on first call (remote-agent-<hostname>).
+ * Derives from machineName if set, otherwise from hostname.
+ * Saved to config so it survives container recreation.
  */
 export async function getTunnelName(): Promise<string> {
   const config = getConfig();
   if (config.tunnelName) return config.tunnelName;
 
-  // Generate from hostname (same logic as scripts/tunnel.sh)
-  const hostId = hostname().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
-  const tunnelName = `remote-agent-${hostId}`;
+  // Use machineName if set, otherwise fall back to hostname
+  const baseName = config.machineName
+    || hostname().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
+  const tunnelName = `remote-agent-${baseName}`;
 
   // Persist so it survives container recreation
   await updateConfig({ tunnelName });
   console.log(`[Config] Generated tunnel name: ${tunnelName}`);
   return tunnelName;
+}
+
+/**
+ * Get the display name for this machine.
+ * Returns machineName from config, or derives from tunnelName, or falls back to hostname.
+ */
+export function getMachineName(): string {
+  const config = getConfig();
+  if (config.machineName) return config.machineName;
+  if (config.tunnelName) return config.tunnelName.replace(/^remote-agent-/, '');
+  return hostname();
 }
