@@ -14,6 +14,7 @@ let cacheTimestamp = 0;
 let discoveryInProgress: Promise<Machine[]> | null = null;
 let discoveryGeneration = 0; // Prevents stale discovery from overwriting newer results
 const CACHE_TTL_MS = 30_000; // 30 seconds
+const OFFLINE_GRACE_MS = 2 * 60 * 1000; // Keep machine "online" for 2 min after last seen connected
 
 // Tunnel access token cache: tunnelId -> { token, expiresAt }
 const tunnelTokenCache = new Map<string, { token: string; expiresAt: number }>();
@@ -315,9 +316,6 @@ export async function discoverMachines(): Promise<Machine[]> {
     }
 
     for (const tunnel of tunnels) {
-      // Only show tunnels that are actively hosted (skip disconnected/stale tunnels)
-      if (tunnel.hostConnections <= 0) continue;
-
       // Derive a machine ID from the tunnel ID (e.g., "remote-agent-abc123" -> "abc123")
       const machineIdFromTunnel = tunnel.tunnelId.replace(/^remote-agent-/, '');
 
@@ -326,14 +324,31 @@ export async function discoverMachines(): Promise<Machine[]> {
       // Fallback: skip if tunnel ID matches our hostname pattern
       if (!ownTunnelName && machineIdFromTunnel === hostname().toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
 
+      // Skip tunnels with no host connections AND no cached presence
+      // (never-seen tunnels with 0 connections are truly offline/stale)
+      const cached = machineCache.find(m => m.id === machineIdFromTunnel);
+      if (tunnel.hostConnections <= 0 && !cached) continue;
+
+      // Determine status: online if hosting, or within grace period of last seen online
+      let status: 'online' | 'offline' = 'online';
+      if (tunnel.hostConnections <= 0) {
+        // Not currently hosting — check grace period
+        const lastOnline = cached?.lastSeen ? new Date(cached.lastSeen).getTime() : 0;
+        if (Date.now() - lastOnline > OFFLINE_GRACE_MS) {
+          status = 'offline';
+        }
+        // Otherwise keep it "online" within grace period (transient blip)
+      }
+
       const machine: Machine = {
         id: machineIdFromTunnel,
         name: machineIdFromTunnel,
         tunnelUrl: tunnel.url,
         tunnelId: tunnel.tunnelId,
-        status: 'online',
+        status,
         isLocal: false,
-        lastSeen: new Date().toISOString(),
+        // Only update lastSeen if actually connected (don't reset on blips)
+        lastSeen: tunnel.hostConnections > 0 ? new Date().toISOString() : (cached?.lastSeen || new Date().toISOString()),
         machineInfo: {
           hostname: machineIdFromTunnel,
           platform: 'unknown',
@@ -341,8 +356,7 @@ export async function discoverMachines(): Promise<Machine[]> {
         },
       };
 
-      // Merge with existing cache to preserve richer info from previous identity checks
-      const cached = machineCache.find(m => m.id === machine.id);
+      // Merge with existing cache to preserve richer info from previous discovery
       if (cached) {
         machine.name = cached.name;
         machine.machineInfo = cached.machineInfo || machine.machineInfo;
@@ -351,15 +365,17 @@ export async function discoverMachines(): Promise<Machine[]> {
       machines.push(machine);
     }
 
-    // Check for machines that were previously online but not found this time
+    // Check for machines that were previously cached but not found in tunnel list at all
     for (const cached of machineCache) {
       if (cached.isLocal) continue;
       if (!machines.find(m => m.id === cached.id)) {
-        // Machine went offline — keep it in the list with offline status
-        machines.push({
-          ...cached,
-          status: 'offline',
-        });
+        // Tunnel no longer exists — check grace period before dropping
+        const lastOnline = cached.lastSeen ? new Date(cached.lastSeen).getTime() : 0;
+        if (Date.now() - lastOnline <= OFFLINE_GRACE_MS) {
+          // Within grace period — keep as online (might be a discovery blip)
+          machines.push({ ...cached });
+        }
+        // Beyond grace period — drop entirely (don't show stale machines)
       }
     }
   } catch (err) {
