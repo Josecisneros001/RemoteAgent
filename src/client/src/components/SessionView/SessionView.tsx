@@ -50,7 +50,8 @@ export function SessionView({
       onTerminalActive?.(currentSession.id);
     } catch (error) {
       console.error('Failed to resume session:', error);
-      alert('Failed to resume session. Please try again.');
+      const msg = error instanceof Error ? error.message : 'Failed to resume session';
+      alert(msg);
     } finally {
       setIsResuming(false);
     }

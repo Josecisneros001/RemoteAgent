@@ -96,6 +96,8 @@ export function SessionList() {
         loadSessionDetail(result.sessionId);
       } catch (error) {
         console.error('Failed to resume CLI session:', error);
+        const msg = error instanceof Error ? error.message : 'Failed to resume session';
+        alert(msg);
       } finally {
         setResumingId(null);
       }
