@@ -9,20 +9,21 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Workspace directory - AI can only access this folder
+      # Shared directories - AI can only access these folders
       - ~/your/projects/folder:/workspace
+      - /q:/q
 
       # Allowlist configuration (hot-reload enabled)
       - ./allowlist.json:/app/allowlist.json
 
       # Claude CLI auth and config (for agent user)
       - ~/.claude.json:/home/agent/.claude.json
-      - ~/.claude-docker/:/home/agent/.claude/
+      - ~/.claude/:/home/agent/.claude/
       # Mount host's settings.json to staging location (entrypoint copies & modifies for Docker)
       - ~/.claude/settings.json:/tmp/claude-settings.json:ro
 
       # Copilot CLI auth and config (for agent user)
-      - ~/.copilot-docker:/home/agent/.copilot
+      - ~/.copilot:/home/agent/.copilot
       - ~/.config/github-copilot:/home/agent/.config/github-copilot
 
       # DNS logs (optional - mount to see logs on host)
