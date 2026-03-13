@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import './MachineSelector.css';
 
-// Auto-poll interval for machine status
-const MACHINE_POLL_INTERVAL_MS = 30_000;
+// Fallback poll interval (WebSocket push is primary, this is backup)
+const MACHINE_POLL_INTERVAL_MS = 60_000;
 
 export function MachineSelector() {
   const {

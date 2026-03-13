@@ -405,13 +405,14 @@ export async function discoverMachines(): Promise<Machine[]> {
 
   // Only write to cache if this is still the latest discovery (prevents stale overwrite)
   if (gen === discoveryGeneration) {
-    const hadRemoteBefore = machineCache.some(m => !m.isLocal);
+    // Only broadcast if the machine list actually changed (prevents UI flicker)
+    const prevSummary = machineCache.map(m => `${m.id}:${m.status}`).sort().join(',');
+    const newSummary = machines.map(m => `${m.id}:${m.status}`).sort().join(',');
+
     machineCache = machines;
     cacheTimestamp = Date.now();
 
-    // Notify connected clients when remote machines are discovered (or list changes)
-    const hasRemoteNow = machines.some(m => !m.isLocal);
-    if (hasRemoteNow || hadRemoteBefore) {
+    if (prevSummary !== newSummary) {
       broadcast({ type: 'machines-updated' });
     }
   }
