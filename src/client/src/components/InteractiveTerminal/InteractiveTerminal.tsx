@@ -149,6 +149,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   const reconnectDelayRef = useRef(1000);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   const connect = useCallback(() => {
     // Guard: don't connect if already open or connecting (WS-9)
@@ -292,6 +293,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
 
     ws.onclose = (event) => {
       console.log('[Terminal] WebSocket closed:', event.code, event.reason);
+      if (!mountedRef.current) return; // Prevent setState/reconnect after unmount
       setIsConnected(false);
 
       // Clear keepalive
@@ -308,7 +310,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
         setError('Reconnecting...');
         reconnectTimerRef.current = setTimeout(() => {
           reconnectTimerRef.current = null;
-          connect();
+          if (mountedRef.current) connect();
         }, reconnectDelayRef.current);
         reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 15_000);
       }
@@ -481,6 +483,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   // Cleanup terminal on unmount
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       // Clear any pending write buffer timer (could be setTimeout or requestAnimationFrame)
       if (writeTimerRef.current) {
         cancelAnimationFrame(writeTimerRef.current);

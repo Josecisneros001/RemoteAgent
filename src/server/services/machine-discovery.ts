@@ -191,15 +191,17 @@ interface TunnelInfo {
 /**
  * Get tunnel IDs from `devtunnel list --json`, then resolve URLs via `devtunnel show --json`.
  * Returns tunnel info including URL, host connection count, and tunnel ID.
+ * Fully async — does not block the event loop.
  */
-function discoverTunnels(devtunnelCmd: string): TunnelInfo[] {
+async function discoverTunnels(devtunnelCmd: string): Promise<TunnelInfo[]> {
   // Step 1: Get tunnel IDs via JSON list
   let listOutput: string;
   try {
-    listOutput = execFileSync(devtunnelCmd, ['list', '--json'], {
+    const result = await execFileAsync(devtunnelCmd, ['list', '--json'], {
       encoding: 'utf-8',
       timeout: 15_000,
     });
+    listOutput = result.stdout;
   } catch (err: any) {
     console.warn(`[Discovery] devtunnel list failed: ${err.message?.substring(0, 80)}`);
     return [];
@@ -220,36 +222,39 @@ function discoverTunnels(devtunnelCmd: string): TunnelInfo[] {
   }
   console.log(`[Discovery] Found ${tunnelIds.length} tunnel(s), resolving details...`);
 
-  // Step 2: Get details for each tunnel via `devtunnel show --json`
-  const tunnels: TunnelInfo[] = [];
-  for (const tunnelId of tunnelIds) {
+  // Step 2: Get details for each tunnel via `devtunnel show --json` (parallel)
+  const tunnelPromises = tunnelIds.map(async (tunnelId) => {
     const id = tunnelId.split('.')[0];
     try {
-      const showOutput = execFileSync(devtunnelCmd, ['show', id, '--json'], {
+      const result = await execFileAsync(devtunnelCmd, ['show', id, '--json'], {
         encoding: 'utf-8',
         timeout: 10_000,
       });
-      const showJson = JSON.parse(showOutput);
+      const showJson = JSON.parse(result.stdout);
       const tunnel = showJson?.tunnel;
-      if (!tunnel) continue;
+      if (!tunnel) return [];
 
       const hostConns = tunnel.hostConnections ?? 0;
       const ports = tunnel.ports || [];
+      const infos: TunnelInfo[] = [];
       for (const port of ports) {
         if (port.portUri && port.portNumber === 3000) {
-          tunnels.push({
+          infos.push({
             tunnelId: id,
             url: port.portUri.replace(/\/+$/, ''),
             hostConnections: hostConns,
           });
         }
       }
+      return infos;
     } catch (err: any) {
       console.warn(`[Discovery] Failed to get details for tunnel ${id}: ${err.message?.substring(0, 80)}`);
+      return [];
     }
-  }
+  });
 
-  return tunnels;
+  const results = await Promise.all(tunnelPromises);
+  return results.flat();
 }
 
 /**
@@ -297,8 +302,8 @@ export async function discoverMachines(): Promise<Machine[]> {
   try {
     const devtunnelCmd = resolveDevtunnelCommand();
 
-    // Discover tunnels via devtunnel CLI (no HTTP calls needed — uses CLI JSON output)
-    const tunnels = discoverTunnels(devtunnelCmd);
+    // Discover tunnels via devtunnel CLI (fully async — no event loop blocking)
+    const tunnels = await discoverTunnels(devtunnelCmd);
     console.log(`[Discovery] Found ${tunnels.length} tunnel(s) with port 3000`);
 
     // Get our own tunnel name from config to skip ourselves in discovery
