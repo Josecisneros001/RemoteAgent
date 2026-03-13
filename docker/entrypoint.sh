@@ -140,6 +140,8 @@ EOF
         iptables -t nat -A LOCALHOST_REDIRECT -p tcp --dport 3000 -j RETURN
         iptables -t nat -A LOCALHOST_REDIRECT -p tcp -j DNAT --to-destination "$HOST_IP"
         iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner $AGENT_UID -d 127.0.0.1 -j LOCALHOST_REDIRECT
+        # MASQUERADE so return traffic from host comes back through the container's network stack
+        iptables -t nat -A POSTROUTING -p tcp -d "$HOST_IP" -m owner --uid-owner $AGENT_UID -j MASQUERADE
         echo "  [+] localhost redirect: 127.0.0.1 → $HOST_IP (host.docker.internal)"
     fi
 
