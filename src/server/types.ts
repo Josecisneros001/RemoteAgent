@@ -1,3 +1,26 @@
+// Machine management types
+export interface Machine {
+  id: string;                    // Unique machine ID (hash of hostname + platform)
+  name: string;                  // Display name (hostname)
+  tunnelUrl: string;             // DevTunnel URL for remote access
+  status: 'online' | 'offline';
+  isLocal: boolean;              // True for the hub machine itself
+  lastSeen: string;              // ISO 8601 timestamp
+  machineInfo?: {
+    hostname: string;
+    platform: string;
+    version: string;
+  };
+}
+
+export interface IdentityResponse {
+  app: 'remote-agent';
+  version: string;
+  hostname: string;
+  platform: string;
+  machineId: string;             // Stable hash of hostname + platform
+}
+
 // Configuration types
 export interface WorkspaceConfig {
   id: string;

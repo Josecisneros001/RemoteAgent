@@ -199,6 +199,23 @@ For **GitHub Copilot**, authenticate on your host first. The container reads fro
 HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build
 ```
 
+The container includes a **Dev Tunnel sidecar** that automatically exposes RemoteAgent for remote access. On first run, the tunnel service will print setup instructions to authenticate (one-time):
+
+```bash
+# One-time: login to Dev Tunnels inside the container
+docker compose build
+docker compose run --rm --entrypoint "" tunnel devtunnel user login -g -d
+
+# Then start everything
+docker compose up -d
+```
+
+The tunnel auto-starts with the app on every `docker compose up` and persists across reboots (`restart: unless-stopped`). To run the app without the tunnel:
+
+```bash
+docker compose up remote-agent
+```
+
 **Step 4: Verify**
 
 Open **http://localhost:3000** and create a session. Check the container logs if anything goes wrong:
@@ -220,6 +237,7 @@ docker compose logs -f
 | `~/.config/github-copilot:/home/agent/.config/github-copilot` | Copilot authentication config |
 | `~/.remote-agent-docker:/home/agent/.remote-agent` | RemoteAgent data (sessions, config) |
 | `./logs:/var/log/dns` | DNS filter logs (optional, for debugging) |
+| `tunnel-auth` (Docker volume) | Dev Tunnel auth tokens (persisted across restarts) |
 
 #### Network Filtering
 
@@ -256,9 +274,13 @@ environment:
 
 Access RemoteAgent from your phone or any device outside your local network.
 
-### Microsoft Dev Tunnels (Recommended)
+### Docker Mode (built-in)
 
-Dev Tunnels provides **built-in authentication** - only you can access the tunnel using your Microsoft or GitHub account. The tunnel URL stays the same across restarts.
+If you're running Docker, the tunnel sidecar is included in `docker-compose.yml` and starts automatically. See [Docker Mode](#docker-mode) above for setup.
+
+### Native Mode (Dev Tunnels)
+
+Dev Tunnels provides **built-in authentication** - only you can access the tunnel using your Microsoft or GitHub account. Each machine gets its own persistent tunnel URL (named `remote-agent-<hostname>`).
 
 ```bash
 # Make sure you've authenticated (see Prerequisites)
@@ -272,7 +294,11 @@ npm run tunnel
 npm run tunnel:win
 ```
 
-The script creates a persistent tunnel named `remote-agent` on port 3000. On first run it creates the tunnel; subsequent runs reuse it with the same URL.
+Override the tunnel name with the `TUNNEL_NAME` environment variable:
+
+```bash
+TUNNEL_NAME=my-custom-name npm run tunnel
+```
 
 ### Other Tunneling Services
 

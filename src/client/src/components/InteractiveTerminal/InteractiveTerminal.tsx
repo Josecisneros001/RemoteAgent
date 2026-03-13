@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { getWsBase } from '../../api';
 import '@xterm/xterm/css/xterm.css';
 import './InteractiveTerminal.css';
 
@@ -145,7 +146,8 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
     // 1. Start WebSocket connection IMMEDIATELY (network I/O runs in parallel)
     // This allows TCP handshake and WebSocket upgrade to happen while we initialize the terminal
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal/${sessionId}`);
+    const wsBase = getWsBase();
+    const ws = new WebSocket(`${protocol}//${window.location.host}${wsBase}/ws/terminal/${sessionId}`);
     wsRef.current = ws;
 
     // 2. While WebSocket is connecting, initialize terminal (CPU work)

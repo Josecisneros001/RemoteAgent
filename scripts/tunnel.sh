@@ -5,9 +5,14 @@
 # Creates a persistent tunnel that keeps the same URL across restarts
 
 PORT=${1:-3000}
-TUNNEL_NAME="remote-agent"
 
-echo "🔗 Starting tunnel for Remote Agent on port $PORT..."
+# Tunnel name: use TUNNEL_NAME env var, or default to remote-agent-<hostname>
+# This ensures each machine gets its own persistent tunnel URL
+HOST_ID=$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-$//')
+TUNNEL_NAME="${TUNNEL_NAME:-remote-agent-$HOST_ID}"
+
+echo "🔗 Starting tunnel '$TUNNEL_NAME' on port $PORT..."
+echo "   (Override with: TUNNEL_NAME=my-name npm run tunnel)"
 echo ""
 
 # Check if devtunnel is installed

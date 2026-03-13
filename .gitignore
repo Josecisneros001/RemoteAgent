@@ -52,3 +52,6 @@ pids/
 
 # LiteLLM Proxy Config
 litellm-proxy/
+
+.agents/skills/*
+.claude/*

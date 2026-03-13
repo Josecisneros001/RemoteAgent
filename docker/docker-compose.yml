@@ -51,9 +51,89 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '16.0'
+          cpus: '12.0'
           memory: 12800M
         reservations:
           cpus: '2.0'
           memory: 2G
     restart: unless-stopped
+
+  # Dev Tunnel sidecar — exposes RemoteAgent to your phone via Microsoft Dev Tunnels
+  # Runs as root because devtunnel CLI is installed at /root/bin during image build
+  # Disable with: docker compose up remote-agent (starts only the app, no tunnel)
+  #
+  # First-time setup (login once, tokens persist in docker volume):
+  #   docker compose build
+  #   docker compose run --rm --entrypoint "" tunnel devtunnel user login -g -d
+  #   docker compose up -d
+  tunnel:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    # Share network with remote-agent so localhost:3000 reaches the app
+    network_mode: "service:remote-agent"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+
+        # Check auth — if not logged in, print setup instructions and wait
+        if ! devtunnel user show &>/dev/null; then
+          echo ""
+          echo "============================================"
+          echo "  DevTunnel auth required (one-time setup)"
+          echo "============================================"
+          echo ""
+          echo "  Run:"
+          echo "    docker compose run --rm --entrypoint '' tunnel devtunnel user login -g -d"
+          echo ""
+          echo "  Then:  docker compose up -d"
+          echo "============================================"
+          echo ""
+          sleep 60
+          exit 1
+        fi
+
+        # Derive tunnel name from hostname (matches scripts/tunnel.sh logic)
+        HOST_ID=$$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-$$//')
+        TUNNEL_NAME="$${TUNNEL_NAME:-remote-agent-$$HOST_ID}"
+
+        echo "Waiting for remote-agent to be ready..."
+        TRIES=0
+        until curl -sf http://localhost:3000/api/identity >/dev/null 2>&1; do
+          TRIES=$$((TRIES + 1))
+          if [ "$$TRIES" -ge 120 ]; then
+            echo "ERROR: remote-agent not ready after 120 seconds, exiting."
+            exit 1
+          fi
+          sleep 1
+        done
+
+        echo "Starting tunnel '$$TUNNEL_NAME' on port 3000..."
+
+        # Create tunnel if it doesn't exist
+        if ! devtunnel show "$$TUNNEL_NAME" &>/dev/null; then
+          echo "Creating tunnel: $$TUNNEL_NAME"
+          devtunnel create "$$TUNNEL_NAME"
+          devtunnel port create "$$TUNNEL_NAME" -p 3000
+        fi
+
+        echo "Hosting tunnel..."
+        exec devtunnel host "$$TUNNEL_NAME"
+    volumes:
+      # Persist devtunnel auth tokens across restarts
+      # devtunnel CLI stores tokens in ./DevTunnels/ relative to WORKDIR (/app)
+      - tunnel-auth:/app/DevTunnels
+    environment:
+      - TUNNEL_NAME=${TUNNEL_NAME:-}
+      - PATH=/root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - HOME=/root
+    depends_on:
+      - remote-agent
+    restart: unless-stopped
+
+volumes:
+  tunnel-auth:

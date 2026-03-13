@@ -6,9 +6,17 @@ param(
     [int]$Port = 3000
 )
 
-$TunnelName = "remote-agent"
+# Tunnel name: use TUNNEL_NAME env var, or default to remote-agent-<hostname>
+# This ensures each machine gets its own persistent tunnel URL
+$HostId = (hostname).ToLower() -replace '[^a-z0-9]+', '-' -replace '-$', ''
+if ($env:TUNNEL_NAME) {
+    $TunnelName = $env:TUNNEL_NAME
+} else {
+    $TunnelName = "remote-agent-$HostId"
+}
 
-Write-Host "🔗 Starting tunnel for Remote Agent on port $Port..." -ForegroundColor Cyan
+Write-Host "🔗 Starting tunnel '$TunnelName' on port $Port..." -ForegroundColor Cyan
+Write-Host "   (Override with: `$env:TUNNEL_NAME='my-name' before running)"
 Write-Host ""
 
 # Check if devtunnel is installed

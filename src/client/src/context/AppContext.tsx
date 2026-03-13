@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Config, Session, Run, WsEvent, ViewType, CliSession } from '../types';
+import type { Config, Session, Run, WsEvent, ViewType, CliSession, Machine } from '../types';
 import * as api from '../api';
 
 interface AppState {
@@ -28,6 +28,11 @@ interface AppState {
   currentView: ViewType;
   workspaceFilter: string;
   sidebarOpen: boolean;
+
+  // Multi-Machine Management
+  machines: Machine[];
+  currentMachineId: string;
+  machinesLoading: boolean;
 }
 
 interface AppContextType extends AppState {
@@ -45,6 +50,10 @@ interface AppContextType extends AppState {
   // CLI Sessions actions
   loadCliSessions: () => Promise<void>;
   refreshCliSessions: () => Promise<void>;
+  // Machine actions
+  loadMachines: () => Promise<void>;
+  refreshMachinesAction: () => Promise<void>;
+  setCurrentMachine: (machineId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -66,6 +75,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentView: 'welcome',
     workspaceFilter: '',
     sidebarOpen: false,
+    machines: [],
+    currentMachineId: 'local',
+    machinesLoading: false,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -75,15 +87,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Keep refs for current IDs to use in WebSocket handler
   const currentSessionIdRef = useRef<string | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const currentMachineIdRef = useRef<string>('local');
+
+  // Generation counter to discard stale responses after machine switch
+  const machineGenerationRef = useRef(0);
 
   useEffect(() => {
     currentSessionIdRef.current = state.currentSessionId;
     currentRunIdRef.current = state.currentRunId;
-  }, [state.currentSessionId, state.currentRunId]);
+    currentMachineIdRef.current = state.currentMachineId;
+  }, [state.currentSessionId, state.currentRunId, state.currentMachineId]);
 
   const loadConfig = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     try {
       const config = await api.fetchConfig();
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({ ...s, config }));
     } catch (error) {
       console.error('Failed to load config:', error);
@@ -91,8 +110,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSessions = useCallback(async (workspaceId?: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSessions(workspaceId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({ ...s, sessions: data.sessions || [] }));
     } catch (error) {
       console.error('Failed to load sessions:', error);
@@ -102,9 +123,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // CLI Sessions: load all sessions
   const loadCliSessions = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     setState(s => ({ ...s, cliSessionsLoading: true }));
     try {
       const data = await api.fetchCliSessions(0, 0); // limit=0 means all
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({
         ...s,
         cliSessions: data.sessions,
@@ -113,15 +136,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
     } catch (error) {
       console.error('Failed to load CLI sessions:', error);
-      setState(s => ({ ...s, cliSessionsLoading: false }));
+      if (gen === machineGenerationRef.current) {
+        setState(s => ({ ...s, cliSessionsLoading: false }));
+      }
     }
   }, []);
 
   // CLI Sessions: force refresh
   const refreshCliSessionsFn = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     setState(s => ({ ...s, cliSessionsLoading: true }));
     try {
       const data = await api.refreshCliSessions();
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({
         ...s,
         cliSessions: data.sessions,
@@ -130,13 +157,82 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
     } catch (error) {
       console.error('Failed to refresh CLI sessions:', error);
-      setState(s => ({ ...s, cliSessionsLoading: false }));
+      if (gen === machineGenerationRef.current) {
+        setState(s => ({ ...s, cliSessionsLoading: false }));
+      }
     }
   }, []);
 
+  // ==================== Machine Management ====================
+
+  const loadMachines = useCallback(async () => {
+    setState(s => ({ ...s, machinesLoading: true }));
+    try {
+      const data = await api.fetchMachines();
+      setState(s => ({
+        ...s,
+        machines: data.machines,
+        machinesLoading: false,
+      }));
+    } catch (error) {
+      console.error('Failed to load machines:', error);
+      setState(s => ({ ...s, machinesLoading: false }));
+    }
+  }, []);
+
+  const refreshMachinesAction = useCallback(async () => {
+    setState(s => ({ ...s, machinesLoading: true }));
+    try {
+      const data = await api.refreshMachinesApi();
+      setState(s => ({
+        ...s,
+        machines: data.machines,
+        machinesLoading: false,
+      }));
+    } catch (error) {
+      console.error('Failed to refresh machines:', error);
+      setState(s => ({ ...s, machinesLoading: false }));
+    }
+  }, []);
+
+  const setCurrentMachine = useCallback((machineId: string) => {
+    // Increment generation counter to discard in-flight responses from previous machine
+    machineGenerationRef.current++;
+
+    // Update the API layer's current machine
+    api.setCurrentMachineId(machineId);
+
+    // Clear current session/view state when switching machines
+    setState(s => ({
+      ...s,
+      currentMachineId: machineId,
+      config: null,
+      currentSessionId: null,
+      currentSession: null,
+      currentRuns: [],
+      currentRunId: null,
+      currentView: 'welcome',
+      cliSessions: [],
+      cliSessionsTotal: 0,
+      sessions: [],
+    }));
+
+    // Reload data for the new machine
+    // (loadConfig and loadCliSessions will use the new API base via getApiBase())
+  }, []);
+
+  // When machine changes, reload data for that machine
+  useEffect(() => {
+    loadConfig();
+    loadCliSessions();
+    loadSessions();
+  }, [state.currentMachineId, loadConfig, loadCliSessions, loadSessions]);
+
   const loadSessionDetail = useCallback(async (sessionId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSession(sessionId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.session) {
         setState(s => ({
           ...s,
@@ -153,8 +249,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSessionRuns = useCallback(async (sessionId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSession(sessionId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.runs) {
         setState(s => ({ ...s, currentRuns: data.runs }));
       }
@@ -164,8 +262,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadRunDetail = useCallback(async (runId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchRun(runId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.run) {
         setState(s => ({
           ...s,
@@ -198,27 +298,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await loadSessions(state.workspaceFilter || undefined);
   }, [loadSessions, state.workspaceFilter]);
 
-  // WebSocket setup
+  // WebSocket setup — connects to the current machine's /ws endpoint
   useEffect(() => {
+    let cancelled = false;
+
     const setupWebSocket = () => {
+      if (cancelled) return; // Prevent zombie reconnection after machine switch
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+      const wsBase = api.getWsBase();
+      const ws = new WebSocket(`${protocol}//${window.location.host}${wsBase}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (cancelled) { ws.close(); return; }
         setState(s => ({ ...s, connectionStatus: 'connected' }));
       };
 
       ws.onclose = () => {
+        if (cancelled) return; // Don't reconnect if effect was cleaned up
         setState(s => ({ ...s, connectionStatus: 'disconnected' }));
         setTimeout(setupWebSocket, 3000);
       };
 
       ws.onerror = () => {
+        if (cancelled) return;
         setState(s => ({ ...s, connectionStatus: 'disconnected' }));
       };
 
       ws.onmessage = (event) => {
+        if (cancelled) return;
         const data: WsEvent = JSON.parse(event.data);
         handleWsEvent(data);
       };
@@ -268,6 +377,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setupWebSocket();
 
     return () => {
+      cancelled = true;
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -278,14 +388,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(sessionRunsDebounceRef.current);
       }
     };
-  }, [loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
+  }, [state.currentMachineId, loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
 
-  // Initial data load - load CLI sessions as the primary session list
+  // Initial data load — load machines in addition to sessions
   useEffect(() => {
-    loadConfig();
-    loadCliSessions();
-    loadSessions(); // Still load RA sessions for detail views
-  }, [loadConfig, loadCliSessions, loadSessions]);
+    loadMachines();
+  }, [loadMachines]);
 
   const value: AppContextType = {
     ...state,
@@ -301,6 +409,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshSessions,
     loadCliSessions,
     refreshCliSessions: refreshCliSessionsFn,
+    loadMachines,
+    refreshMachinesAction,
+    setCurrentMachine,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
