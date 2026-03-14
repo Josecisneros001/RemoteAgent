@@ -9,20 +9,19 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      # Workspace directory - AI can only access this folder
+      # Shared directories - AI can only access these folders
       - ~/your/projects/folder:/workspace
+      - /q:/q
 
       # Allowlist configuration (hot-reload enabled)
       - ./allowlist.json:/app/allowlist.json
 
       # Claude CLI auth and config (for agent user)
       - ~/.claude.json:/home/agent/.claude.json
-      - ~/.claude-docker/:/home/agent/.claude/
-      # Mount host's settings.json to staging location (entrypoint copies & modifies for Docker)
-      - ~/.claude/settings.json:/tmp/claude-settings.json:ro
+      - ~/.claude/:/home/agent/.claude/
 
       # Copilot CLI auth and config (for agent user)
-      - ~/.copilot-docker:/home/agent/.copilot
+      - ~/.copilot:/home/agent/.copilot
       - ~/.config/github-copilot:/home/agent/.config/github-copilot
 
       # DNS logs (optional - mount to see logs on host)
@@ -30,6 +29,9 @@ services:
 
       # RemoteAgent data (sessions, runs, config)
       - ~/.remote-agent-docker:/home/agent/.remote-agent
+
+      # DevTunnel auth tokens (shared with tunnel sidecar for machine discovery)
+      - tunnel-auth:/app/DevTunnels
     environment:
       - NODE_ENV=production
       - DOCKER_MODE=true
@@ -41,6 +43,9 @@ services:
     cap_add:
       # Required for iptables firewall rules
       - NET_ADMIN
+    sysctls:
+      # Required for localhost → host.docker.internal DNAT redirect
+      - net.ipv4.conf.all.route_localnet=1
     extra_hosts:
       # Allow container to access host machine services (e.g., local API on port 4000)
       - "host.docker.internal:host-gateway"
@@ -51,9 +56,91 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '16.0'
+          cpus: '12.0'
           memory: 12800M
         reservations:
           cpus: '2.0'
           memory: 2G
     restart: unless-stopped
+
+  # Dev Tunnel sidecar — exposes RemoteAgent to your phone via Microsoft Dev Tunnels
+  # Runs as root because devtunnel CLI is installed at /root/bin during image build
+  # Disable with: docker compose up remote-agent (starts only the app, no tunnel)
+  #
+  # First-time setup (login once, tokens persist in docker volume):
+  #   docker compose build
+  #   docker compose run --rm --entrypoint "" tunnel devtunnel user login -g -d
+  #   docker compose up -d
+  tunnel:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
+    # Share network with remote-agent so localhost:3000 reaches the app
+    network_mode: "service:remote-agent"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+
+        # Check auth — if not logged in, print setup instructions and wait
+        if ! devtunnel user show &>/dev/null; then
+          echo ""
+          echo "============================================"
+          echo "  DevTunnel auth required (one-time setup)"
+          echo "============================================"
+          echo ""
+          echo "  Run:"
+          echo "    docker compose run --rm --entrypoint '' tunnel devtunnel user login -g -d"
+          echo ""
+          echo "  Then:  docker compose up -d"
+          echo "============================================"
+          echo ""
+          sleep 60
+          exit 1
+        fi
+
+        echo "Waiting for remote-agent to be ready..."
+        TRIES=0
+        until curl -sf http://localhost:3000/api/identity >/dev/null 2>&1; do
+          TRIES=$$((TRIES + 1))
+          if [ "$$TRIES" -ge 120 ]; then
+            echo "ERROR: remote-agent not ready after 120 seconds, exiting."
+            exit 1
+          fi
+          sleep 1
+        done
+
+        # Get persistent tunnel name from app config (survives container recreation)
+        TUNNEL_NAME=$$(curl -sf http://localhost:3000/api/tunnel-name | grep -o '"tunnelName":"[^"]*"' | cut -d'"' -f4)
+        if [ -z "$$TUNNEL_NAME" ]; then
+          echo "ERROR: Failed to get tunnel name from app config."
+          exit 1
+        fi
+
+        echo "Starting tunnel '$$TUNNEL_NAME' on port 3000..."
+
+        # Create tunnel if it doesn't exist
+        if ! devtunnel show "$$TUNNEL_NAME" &>/dev/null; then
+          echo "Creating tunnel: $$TUNNEL_NAME"
+          devtunnel create "$$TUNNEL_NAME"
+          devtunnel port create "$$TUNNEL_NAME" -p 3000
+        fi
+
+        echo "Hosting tunnel..."
+        exec devtunnel host "$$TUNNEL_NAME"
+    volumes:
+      # Persist devtunnel auth tokens across restarts
+      # devtunnel CLI stores tokens in ./DevTunnels/ relative to WORKDIR (/app)
+      - tunnel-auth:/app/DevTunnels
+    environment:
+      - PATH=/root/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - HOME=/root
+    depends_on:
+      - remote-agent
+    restart: unless-stopped
+
+volumes:
+  tunnel-auth:

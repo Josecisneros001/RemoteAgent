@@ -91,8 +91,8 @@ export interface CommitFile {
 
 // WebSocket Event Types
 export interface WsEvent {
-  type: 'log' | 'phase' | 'validation' | 'image' | 'complete' | 'pty-data' | 'interaction-needed' | 'pty-exit';
-  sessionId: string;
+  type: 'log' | 'phase' | 'validation' | 'image' | 'complete' | 'pty-data' | 'interaction-needed' | 'pty-exit' | 'machines-updated';
+  sessionId?: string;
   runId?: string;
   phase?: 'prompt' | 'validation' | 'output';
   content?: string;
@@ -134,3 +134,18 @@ export interface DeviceInfo {
 export type ViewType = 'welcome' | 'new-session' | 'session';
 export type RunViewType = 'new-run' | 'run-detail' | 'empty';
 export type RunTabType = 'run' | 'commits';
+
+// Multi-Machine Management
+export interface Machine {
+  id: string;
+  name: string;
+  tunnelUrl: string;
+  status: 'online' | 'offline';
+  isLocal: boolean;
+  lastSeen: string;
+  machineInfo?: {
+    hostname: string;
+    platform: string;
+    version: string;
+  };
+}

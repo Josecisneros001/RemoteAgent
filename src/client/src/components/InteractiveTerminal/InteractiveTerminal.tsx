@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { getWsBase } from '../../api';
 import '@xterm/xterm/css/xterm.css';
 import './InteractiveTerminal.css';
 
@@ -21,6 +22,12 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   const lastDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Stabilize callback props with refs to prevent WS reconnect on parent re-render (WS-1)
+  const onInteractionNeededRef = useRef(onInteractionNeeded);
+  const onExitRef = useRef(onExit);
+  useEffect(() => { onInteractionNeededRef.current = onInteractionNeeded; }, [onInteractionNeeded]);
+  useEffect(() => { onExitRef.current = onExit; }, [onExit]);
   // Modifier toolbar state (used by modifier key toolbar UI - will be implemented in subsequent tasks)
   const [showModifierToolbar, setShowModifierToolbar] = useState(false);
   // Use ref for activeModifiers to avoid re-renders and WebSocket reconnections
@@ -139,13 +146,27 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   }, [isVisible, refitTerminal]);
 
   // Connect WebSocket and setup terminal
+  const reconnectDelayRef = useRef(1000);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
+
   const connect = useCallback(() => {
-    if (!terminalRef.current || wsRef.current?.readyState === WebSocket.OPEN) return;
+    // Guard: don't connect if already open or connecting (WS-9)
+    if (!terminalRef.current ||
+        wsRef.current?.readyState === WebSocket.OPEN ||
+        wsRef.current?.readyState === WebSocket.CONNECTING) return;
+
+    // Clear any pending reconnect
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
 
     // 1. Start WebSocket connection IMMEDIATELY (network I/O runs in parallel)
-    // This allows TCP handshake and WebSocket upgrade to happen while we initialize the terminal
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal/${sessionId}`);
+    const wsBase = getWsBase();
+    const ws = new WebSocket(`${protocol}//${window.location.host}${wsBase}/ws/terminal/${sessionId}`);
     wsRef.current = ws;
 
     // 2. While WebSocket is connecting, initialize terminal (CPU work)
@@ -209,11 +230,19 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
     const term = termRef.current;
     const fitAddon = fitAddonRef.current;
 
-    // 4. Setup WebSocket handlers (ws may already be connected by now!)
+    // 4. Setup WebSocket handlers
     ws.onopen = () => {
       console.log('[Terminal] WebSocket connected');
       setIsConnected(true);
       setError(null);
+      reconnectDelayRef.current = 1000; // Reset backoff on success
+
+      // Keepalive ping to prevent devtunnel idle timeout (WS-5)
+      pingTimerRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ type: 'ping', sessionId })); } catch { /* ignore */ }
+        }
+      }, 25_000);
 
       // Send initial resize
       if (fitAddon && term) {
@@ -245,9 +274,9 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
             bytesReceivedRef.current = 0;
           }
         } else if (data.type === 'interaction-needed') {
-          onInteractionNeeded?.(data.reason);
+          onInteractionNeededRef.current?.(data.reason);
         } else if (data.type === 'pty-exit') {
-          onExit?.(data.exitCode);
+          onExitRef.current?.(data.exitCode);
           // Flush any pending writes before showing exit message
           flushWrites();
           termRef.current?.write(`\r\n\x1b[90m--- Session ended (exit code: ${data.exitCode}) ---\x1b[0m\r\n`);
@@ -259,17 +288,31 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
 
     ws.onerror = (event) => {
       console.error('[Terminal] WebSocket error:', event);
-      setError('Connection error');
+      // Don't set error here — onclose will fire right after
     };
 
     ws.onclose = (event) => {
       console.log('[Terminal] WebSocket closed:', event.code, event.reason);
+      if (!mountedRef.current) return; // Prevent setState/reconnect after unmount
       setIsConnected(false);
 
+      // Clear keepalive
+      if (pingTimerRef.current) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
+
       if (event.code === 4000) {
+        // No active session — don't auto-reconnect
         setError('No active session. Click Resume to start.');
       } else if (event.code !== 1000) {
-        setError(`Connection closed: ${event.reason || 'Unknown reason'}`);
+        // Transient failure — auto-reconnect with backoff (WS-2)
+        setError('Reconnecting...');
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectTimerRef.current = null;
+          if (mountedRef.current) connect();
+        }, reconnectDelayRef.current);
+        reconnectDelayRef.current = Math.min(reconnectDelayRef.current * 2, 15_000);
       }
     };
 
@@ -313,7 +356,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
         writeTimerRef.current = null;
       }
     };
-  }, [sessionId, onInteractionNeeded, onExit, bufferedWrite, flushWrites]);
+  }, [sessionId, bufferedWrite, flushWrites]);
 
   // Setup resize observer with debouncing and minimum size change threshold
   useEffect(() => {
@@ -395,6 +438,14 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
 
     return () => {
       cleanup?.();
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+      if (pingTimerRef.current) {
+        clearInterval(pingTimerRef.current);
+        pingTimerRef.current = null;
+      }
       wsRef.current?.close();
       wsRef.current = null;
     };
@@ -432,6 +483,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
   // Cleanup terminal on unmount
   useEffect(() => {
     return () => {
+      mountedRef.current = false;
       // Clear any pending write buffer timer (could be setTimeout or requestAnimationFrame)
       if (writeTimerRef.current) {
         cancelAnimationFrame(writeTimerRef.current);
@@ -463,7 +515,7 @@ export function InteractiveTerminal({ sessionId, isVisible = true, onInteraction
         <span className="status-text">
           {isConnected ? 'Connected' : error || 'Disconnected'}
         </span>
-        {!isConnected && !error && (
+        {!isConnected && (
           <button className="reconnect-btn" onClick={connect}>
             Reconnect
           </button>

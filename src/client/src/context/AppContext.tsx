@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { Config, Session, Run, WsEvent, ViewType, CliSession } from '../types';
+import type { Config, Session, Run, WsEvent, ViewType, CliSession, Machine } from '../types';
 import * as api from '../api';
 
 interface AppState {
@@ -28,6 +28,12 @@ interface AppState {
   currentView: ViewType;
   workspaceFilter: string;
   sidebarOpen: boolean;
+
+  // Multi-Machine Management
+  machines: Machine[];
+  currentMachineId: string;
+  machinesLoading: boolean;
+  machinesDiscovered: boolean;  // true after first successful discovery completes
 }
 
 interface AppContextType extends AppState {
@@ -45,6 +51,10 @@ interface AppContextType extends AppState {
   // CLI Sessions actions
   loadCliSessions: () => Promise<void>;
   refreshCliSessions: () => Promise<void>;
+  // Machine actions
+  loadMachines: () => Promise<void>;
+  refreshMachinesAction: () => Promise<void>;
+  setCurrentMachine: (machineId: string) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -66,6 +76,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     currentView: 'welcome',
     workspaceFilter: '',
     sidebarOpen: false,
+    machines: [],
+    currentMachineId: 'local',
+    machinesLoading: false,
+    machinesDiscovered: false,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -75,15 +89,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Keep refs for current IDs to use in WebSocket handler
   const currentSessionIdRef = useRef<string | null>(null);
   const currentRunIdRef = useRef<string | null>(null);
+  const currentMachineIdRef = useRef<string>('local');
+
+  // Generation counter to discard stale responses after machine switch
+  const machineGenerationRef = useRef(0);
 
   useEffect(() => {
     currentSessionIdRef.current = state.currentSessionId;
     currentRunIdRef.current = state.currentRunId;
-  }, [state.currentSessionId, state.currentRunId]);
+    currentMachineIdRef.current = state.currentMachineId;
+  }, [state.currentSessionId, state.currentRunId, state.currentMachineId]);
 
   const loadConfig = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     try {
       const config = await api.fetchConfig();
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({ ...s, config }));
     } catch (error) {
       console.error('Failed to load config:', error);
@@ -91,8 +112,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSessions = useCallback(async (workspaceId?: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSessions(workspaceId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({ ...s, sessions: data.sessions || [] }));
     } catch (error) {
       console.error('Failed to load sessions:', error);
@@ -102,9 +125,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // CLI Sessions: load all sessions
   const loadCliSessions = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     setState(s => ({ ...s, cliSessionsLoading: true }));
     try {
       const data = await api.fetchCliSessions(0, 0); // limit=0 means all
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({
         ...s,
         cliSessions: data.sessions,
@@ -113,15 +138,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
     } catch (error) {
       console.error('Failed to load CLI sessions:', error);
-      setState(s => ({ ...s, cliSessionsLoading: false }));
+      if (gen === machineGenerationRef.current) {
+        setState(s => ({ ...s, cliSessionsLoading: false }));
+      }
     }
   }, []);
 
   // CLI Sessions: force refresh
   const refreshCliSessionsFn = useCallback(async () => {
+    const gen = machineGenerationRef.current;
     setState(s => ({ ...s, cliSessionsLoading: true }));
     try {
       const data = await api.refreshCliSessions();
+      if (gen !== machineGenerationRef.current) return; // Stale response
       setState(s => ({
         ...s,
         cliSessions: data.sessions,
@@ -130,13 +159,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }));
     } catch (error) {
       console.error('Failed to refresh CLI sessions:', error);
-      setState(s => ({ ...s, cliSessionsLoading: false }));
+      if (gen === machineGenerationRef.current) {
+        setState(s => ({ ...s, cliSessionsLoading: false }));
+      }
     }
   }, []);
 
+  // ==================== Machine Management ====================
+
+  const loadMachines = useCallback(async () => {
+    setState(s => ({ ...s, machinesLoading: true }));
+    try {
+      const data = await api.fetchMachines();
+      const hasRemote = data.machines.some((m: Machine) => !m.isLocal);
+      setState(s => ({
+        ...s,
+        machines: data.machines,
+        machinesLoading: false,
+        // Mark discovered once we get remote machines (not just the initial local-only response)
+        machinesDiscovered: s.machinesDiscovered || hasRemote,
+      }));
+    } catch (error) {
+      console.error('Failed to load machines:', error);
+      setState(s => ({ ...s, machinesLoading: false }));
+    }
+  }, []);
+
+  const refreshMachinesAction = useCallback(async () => {
+    setState(s => ({ ...s, machinesLoading: true }));
+    try {
+      const data = await api.refreshMachinesApi();
+      setState(s => ({
+        ...s,
+        machines: data.machines,
+        machinesLoading: false,
+        machinesDiscovered: true,
+      }));
+    } catch (error) {
+      console.error('Failed to refresh machines:', error);
+      setState(s => ({ ...s, machinesLoading: false }));
+    }
+  }, []);
+
+  const setCurrentMachine = useCallback((machineId: string) => {
+    // Increment generation counter to discard in-flight responses from previous machine
+    machineGenerationRef.current++;
+
+    // Update the API layer's current machine
+    api.setCurrentMachineId(machineId);
+
+    // Clear current session/view state when switching machines
+    setState(s => ({
+      ...s,
+      currentMachineId: machineId,
+      config: null,
+      currentSessionId: null,
+      currentSession: null,
+      currentRuns: [],
+      currentRunId: null,
+      currentView: 'welcome',
+      cliSessions: [],
+      cliSessionsTotal: 0,
+      sessions: [],
+    }));
+
+    // Reload data for the new machine
+    // (loadConfig and loadCliSessions will use the new API base via getApiBase())
+  }, []);
+
+  // When machine changes, reload data for that machine
+  useEffect(() => {
+    loadConfig();
+    loadCliSessions();
+    loadSessions();
+  }, [state.currentMachineId, loadConfig, loadCliSessions, loadSessions]);
+
   const loadSessionDetail = useCallback(async (sessionId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSession(sessionId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.session) {
         setState(s => ({
           ...s,
@@ -153,8 +255,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadSessionRuns = useCallback(async (sessionId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchSession(sessionId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.runs) {
         setState(s => ({ ...s, currentRuns: data.runs }));
       }
@@ -164,8 +268,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadRunDetail = useCallback(async (runId: string) => {
+    const gen = machineGenerationRef.current;
     try {
       const data = await api.fetchRun(runId);
+      if (gen !== machineGenerationRef.current) return; // Stale response
       if (data.run) {
         setState(s => ({
           ...s,
@@ -194,80 +300,119 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, currentRunId: runId }));
   }, []);
 
-  const refreshSessions = useCallback(async () => {
-    await loadSessions(state.workspaceFilter || undefined);
-  }, [loadSessions, state.workspaceFilter]);
+  const workspaceFilterRef = useRef(state.workspaceFilter);
+  useEffect(() => { workspaceFilterRef.current = state.workspaceFilter; }, [state.workspaceFilter]);
 
-  // WebSocket setup
+  const refreshSessions = useCallback(async () => {
+    await loadSessions(workspaceFilterRef.current || undefined);
+  }, [loadSessions]);
+
+  // WebSocket event handler — stored in ref so WS effect has stable deps (WS-4)
+  const handleWsEventRef = useRef<(event: WsEvent) => void>(() => {});
+  handleWsEventRef.current = (event: WsEvent) => {
+    // Skip PTY events in main handler - they're handled separately in the terminal component
+    if (event.type === 'pty-data' || event.type === 'interaction-needed' || event.type === 'pty-exit') {
+      return;
+    }
+
+    // Machine discovery completed — refresh machine list
+    if (event.type === 'machines-updated') {
+      loadMachines();
+      return;
+    }
+
+    // Update views if applicable (debounced)
+    if (event.sessionId === currentSessionIdRef.current) {
+      if (event.runId && event.runId === currentRunIdRef.current) {
+        if (runDetailDebounceRef.current) {
+          clearTimeout(runDetailDebounceRef.current);
+        }
+        runDetailDebounceRef.current = setTimeout(() => {
+          if (event.runId) {
+            loadRunDetail(event.runId);
+          }
+        }, DEBOUNCE_DELAY);
+      } else {
+        if (sessionRunsDebounceRef.current) {
+          clearTimeout(sessionRunsDebounceRef.current);
+        }
+        sessionRunsDebounceRef.current = setTimeout(() => {
+          loadSessionRuns(currentSessionIdRef.current!);
+        }, DEBOUNCE_DELAY);
+      }
+    }
+
+    if (event.type === 'complete') {
+      refreshSessions();
+    }
+
+    if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId && event.sessionId) {
+      setState(s => ({
+        ...s,
+        currentRunId: event.runId ?? null,
+        currentSessionId: event.sessionId!,
+      }));
+      loadSessionDetail(event.sessionId!);
+    }
+  };
+
+  // WebSocket setup — always connects to the LOCAL server's /ws endpoint
+  // This is for push notifications, session updates, machine discovery events.
+  // Terminal WS connections go through the proxy separately (in InteractiveTerminal).
+  // Effect has NO dependencies — connects once and stays stable (WS-4).
   useEffect(() => {
+    let cancelled = false;
+    let reconnectDelay = 1000;
+    let pingInterval: ReturnType<typeof setInterval> | null = null;
+
     const setupWebSocket = () => {
+      if (cancelled) return;
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // Always connect to local /ws — never proxy the broadcast WebSocket
       const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (cancelled) { ws.close(); return; }
         setState(s => ({ ...s, connectionStatus: 'connected' }));
+        reconnectDelay = 1000; // Reset backoff on successful connect
+
+        // Keepalive: send ping every 25s to prevent tunnel/proxy idle timeout
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* ignore */ }
+          }
+        }, 25_000);
       };
 
       ws.onclose = () => {
+        if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+        if (cancelled) return;
         setState(s => ({ ...s, connectionStatus: 'disconnected' }));
-        setTimeout(setupWebSocket, 3000);
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s max
+        setTimeout(setupWebSocket, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
       };
 
       ws.onerror = () => {
-        setState(s => ({ ...s, connectionStatus: 'disconnected' }));
+        if (cancelled) return;
+        // Don't set disconnected here — onclose will fire right after
       };
 
       ws.onmessage = (event) => {
-        const data: WsEvent = JSON.parse(event.data);
-        handleWsEvent(data);
+        if (cancelled) return;
+        try {
+          const data: WsEvent = JSON.parse(event.data);
+          handleWsEventRef.current(data);
+        } catch { /* ignore malformed messages */ }
       };
-    };
-
-    const handleWsEvent = (event: WsEvent) => {
-      // Skip PTY events in main handler - they're handled separately in the terminal component
-      if (event.type === 'pty-data' || event.type === 'interaction-needed' || event.type === 'pty-exit') {
-        return;
-      }
-
-      // Update views if applicable (debounced)
-      if (event.sessionId === currentSessionIdRef.current) {
-        if (event.runId && event.runId === currentRunIdRef.current) {
-          if (runDetailDebounceRef.current) {
-            clearTimeout(runDetailDebounceRef.current);
-          }
-          runDetailDebounceRef.current = setTimeout(() => {
-            if (event.runId) {
-              loadRunDetail(event.runId);
-            }
-          }, DEBOUNCE_DELAY);
-        } else {
-          if (sessionRunsDebounceRef.current) {
-            clearTimeout(sessionRunsDebounceRef.current);
-          }
-          sessionRunsDebounceRef.current = setTimeout(() => {
-            loadSessionRuns(currentSessionIdRef.current!);
-          }, DEBOUNCE_DELAY);
-        }
-      }
-
-      if (event.type === 'complete') {
-        refreshSessions();
-      }
-
-      if (event.type === 'phase' && event.phase === 'prompt' && !currentRunIdRef.current && event.runId) {
-        setState(s => ({
-          ...s,
-          currentRunId: event.runId ?? null,
-          currentSessionId: event.sessionId,
-        }));
-        loadSessionDetail(event.sessionId);
-      }
     };
 
     setupWebSocket();
 
     return () => {
+      cancelled = true;
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -278,14 +423,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearTimeout(sessionRunsDebounceRef.current);
       }
     };
-  }, [loadRunDetail, loadSessionRuns, loadSessionDetail, refreshSessions]);
+  }, []); // Empty deps — WS connects once, handler ref keeps it current
 
-  // Initial data load - load CLI sessions as the primary session list
+  // Initial data load — machines update automatically via WebSocket 'machines-updated' event
   useEffect(() => {
-    loadConfig();
-    loadCliSessions();
-    loadSessions(); // Still load RA sessions for detail views
-  }, [loadConfig, loadCliSessions, loadSessions]);
+    loadMachines();
+  }, [loadMachines]);
 
   const value: AppContextType = {
     ...state,
@@ -301,6 +444,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshSessions,
     loadCliSessions,
     refreshCliSessions: refreshCliSessionsFn,
+    loadMachines,
+    refreshMachinesAction,
+    setCurrentMachine,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

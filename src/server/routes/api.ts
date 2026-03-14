@@ -1,8 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { readFile, mkdir } from 'fs/promises';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { hostname, platform } from 'os';
 import { v4 as uuidv4 } from 'uuid';
-import { getConfig, getWorkspace, addWorkspace } from '../services/config.js';
+import { getConfig, getWorkspace, addWorkspace, getTunnelName } from '../services/config.js';
 import { listSessions, getSession, saveSession, listRuns, getRun, getLatestRun, getRunsForSession, createSession as createSessionStore, updateSessionCopilotId, updateSessionInteractive } from '../services/run-store.js';
 import { addSubscription, removeSubscription, getVapidPublicKey, listDevices, removeDevice, renameDevice, sendTestNotification } from '../services/push.js';
 import { broadcast } from '../services/websocket.js';
@@ -12,7 +14,12 @@ import { startInteractiveSession, stopSession, isSessionActive, getActiveSession
 import { ensureClaudeHookConfig } from '../services/claude-hooks.js';
 import { pathExists } from '../utils/fs.js';
 import { discoverAll, invalidateCache } from '../services/session-discovery.js';
-import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest, ResumeCliSessionRequest, HookNotificationRequest, SubscribeRequest, UnsubscribeRequest, RenameDeviceRequest } from '../types.js';
+import { getCachedMachines, refreshMachines, getMachine, startHealthMonitoring, getLocalMachineId } from '../services/machine-discovery.js';
+import { proxyHttpRequest } from '../services/proxy.js';
+import type { CreateSessionRequest, PushSubscription, CloneWorkspaceRequest, ResumeCliSessionRequest, HookNotificationRequest, SubscribeRequest, UnsubscribeRequest, RenameDeviceRequest, IdentityResponse } from '../types.js';
+
+const __filename_api = fileURLToPath(import.meta.url);
+const __dirname_api = dirname(__filename_api);
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
   // ==================== CONFIG ====================
@@ -31,8 +38,64 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  // ==================== IDENTITY ====================
+
+  // Get machine identity fingerprint (used for multi-machine discovery)
+  app.get('/api/identity', async (): Promise<IdentityResponse> => {
+    const host = hostname();
+    const plat = platform();
+    const machineId = getLocalMachineId();
+    let version = '0.0.0';
+    try {
+      const pkgPath = join(__dirname_api, '../../../package.json');
+      const pkgJson = JSON.parse(await readFile(pkgPath, 'utf-8'));
+      version = pkgJson.version || version;
+    } catch {
+      // Non-critical: use default version
+    }
+    return {
+      app: 'remote-agent',
+      version,
+      hostname: host,
+      platform: plat,
+      machineId,
+    };
+  });
+
+  // Get persistent tunnel name (auto-generates and saves to config on first call)
+  app.get('/api/tunnel-name', async () => {
+    const name = await getTunnelName();
+    return { tunnelName: name };
+  });
+
+  // ==================== MACHINES (Multi-Machine Management) ====================
+
+  // List discovered machines (cached)
+  app.get('/api/machines', async () => {
+    const machines = await getCachedMachines();
+    return { machines };
+  });
+
+  // Force re-discovery of machines
+  app.post('/api/machines/refresh', async () => {
+    const machines = await refreshMachines();
+    return { machines };
+  });
+
+  // Get a single machine by ID
+  app.get<{ Params: { id: string } }>('/api/machines/:id', async (request, reply) => {
+    const machine = await getMachine(request.params.id);
+    if (!machine) {
+      return reply.status(404).send({ error: 'Machine not found' });
+    }
+    return { machine };
+  });
+
+  // Start background health monitoring for discovered machines
+  startHealthMonitoring();
+
   // ==================== PUSH NOTIFICATIONS ====================
-  
+
   // Get VAPID public key for push notifications
   app.get('/api/push/vapid-key', async () => {
     return { publicKey: getVapidPublicKey() };
@@ -179,7 +242,14 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     }
 
     // Start PTY session
-    const ptySession = await startInteractiveSession(session, prompt, false);
+    let ptySession;
+    try {
+      ptySession = await startInteractiveSession(session, prompt, false);
+    } catch (err) {
+      return reply.status(400).send({
+        error: err instanceof Error ? err.message : 'Failed to start interactive session',
+      });
+    }
     if (!ptySession) {
       return reply.status(500).send({ error: 'Failed to start interactive session' });
     }
@@ -324,9 +394,8 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       ptySession = await startInteractiveSession(session, undefined, true);
     } catch (err) {
       console.error(`[API] PTY start failed for session ${sessionId}:`, err);
-      return reply.status(500).send({
-        error: 'Failed to resume interactive session',
-        details: err instanceof Error ? err.message : String(err),
+      return reply.status(400).send({
+        error: err instanceof Error ? err.message : 'Failed to resume interactive session',
       });
     }
     if (!ptySession) {
@@ -705,4 +774,12 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         .send(content);
     }
   );
+
+  // ==================== PROXY (catch-all — must be LAST) ====================
+
+  // Proxy HTTP requests to remote machines
+  // Matches: /proxy/:machineId/api/... or /proxy/:machineId/any/path
+  app.all<{ Params: { machineId: string; '*': string } }>('/proxy/:machineId/*', async (request, reply) => {
+    await proxyHttpRequest(request.params.machineId, request, reply);
+  });
 }

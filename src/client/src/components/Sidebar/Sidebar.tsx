@@ -12,6 +12,8 @@ export function Sidebar() {
     setCurrentView,
     refreshCliSessions,
     cliSessionsLoading,
+    machines,
+    currentMachineId,
   } = useApp();
 
   const {
@@ -29,11 +31,21 @@ export function Sidebar() {
     setCurrentView('new-session');
   };
 
+  // Show machine name subtitle when multiple machines are present
+  const currentMachine = machines.length > 1
+    ? machines.find(m => m.id === currentMachineId)
+    : null;
+
   return (
     <>
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
-          <h1>🤖 Remote Agent</h1>
+          <div className="sidebar-title-group">
+            <h1>Remote Agent</h1>
+            {currentMachine && (
+              <span className="sidebar-machine-subtitle">{currentMachine.name}</span>
+            )}
+          </div>
           <div className="header-status">
             <button
               className={`notification-toggle ${notificationsEnabled ? 'enabled' : ''} ${isSubscribing ? 'subscribing' : ''}`}

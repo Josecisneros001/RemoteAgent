@@ -1,3 +1,27 @@
+// Machine management types
+export interface Machine {
+  id: string;                    // Unique machine ID (derived from tunnel name)
+  name: string;                  // Display name (machineName from config)
+  tunnelUrl: string;             // DevTunnel URL for remote access
+  tunnelId?: string;             // DevTunnel tunnel ID (for token generation)
+  status: 'online' | 'offline';
+  isLocal: boolean;              // True for the hub machine itself
+  lastSeen: string;              // ISO 8601 timestamp
+  machineInfo?: {
+    hostname: string;
+    platform: string;
+    version: string;
+  };
+}
+
+export interface IdentityResponse {
+  app: 'remote-agent';
+  version: string;
+  hostname: string;
+  platform: string;
+  machineId: string;             // Stable hash of hostname + platform
+}
+
 // Configuration types
 export interface WorkspaceConfig {
   id: string;
@@ -10,6 +34,8 @@ export interface Config {
   workspaces: WorkspaceConfig[];
   defaultBrowsePath?: string;     // Default path for workspace browser
   port: number;
+  machineName?: string;           // Friendly name for this machine (used in tunnel name + UI tabs)
+  tunnelName?: string;            // Persistent devtunnel name (auto-generated from machineName)
   vapidPublicKey?: string;
   vapidPrivateKey?: string;
   vapidEmail?: string;
@@ -205,7 +231,11 @@ export interface WsPtyAckEvent {
   bytes: number;  // Number of bytes acknowledged by client
 }
 
-export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent | WsPtyAckEvent;
+export interface WsMachinesUpdatedEvent {
+  type: 'machines-updated';
+}
+
+export type WsEvent = WsLogEvent | WsPhaseEvent | WsValidationEvent | WsImageEvent | WsErrorEvent | WsCompleteEvent | WsPtyDataEvent | WsInteractionNeededEvent | WsPtyExitEvent | WsPtyAckEvent | WsMachinesUpdatedEvent;
 
 // Push subscription
 export interface PushSubscription {

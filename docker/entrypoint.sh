@@ -4,6 +4,16 @@ set -e
 echo "=== RemoteAgent Docker Container ==="
 echo "Starting..."
 
+# Ensure devtunnel CLI is accessible to agent user (installed under /root/bin)
+if [ -f /root/bin/devtunnel ]; then
+  chmod 755 /root /root/bin /root/bin/devtunnel 2>/dev/null || true
+fi
+
+# Ensure devtunnel auth tokens are readable by agent user (shared volume at /app/DevTunnels)
+if [ -d /app/DevTunnels ]; then
+  chown -R agent:agent /app/DevTunnels 2>/dev/null || true
+fi
+
 # Increase file descriptor limits
 ulimit -n 65536 2>/dev/null || true
 
@@ -17,12 +27,6 @@ echo "Running as user: $AGENT_USER (UID=$AGENT_UID, GID=$AGENT_GID)"
 # Create home directories if they don't exist
 mkdir -p /home/$AGENT_USER/.claude /home/$AGENT_USER/.copilot /home/$AGENT_USER/.remote-agent/sessions /home/$AGENT_USER/.remote-agent/runs /home/$AGENT_USER/.config
 
-# Copy and modify Claude settings.json for Docker environment
-# Replace localhost with host.docker.internal so container can reach host services
-if [ -f "/tmp/claude-settings.json" ]; then
-    echo "Copying Claude settings.json (localhost -> host.docker.internal)..."
-    sed 's/localhost/host.docker.internal/g' /tmp/claude-settings.json > /home/$AGENT_USER/.claude/settings.json
-fi
 
 # Ensure proper ownership of home directory and all subdirectories
 # This is important for mounted volumes that may have root ownership
@@ -102,6 +106,25 @@ EOF
     iptables -A OUTPUT -p tcp --dport 80 -m owner --uid-owner $AGENT_UID -j ACCEPT
     iptables -A OUTPUT -p tcp --dport 443 -m owner --uid-owner $AGENT_UID -j ACCEPT
     echo "  [+] HTTP/HTTPS: allowed (DNS-filtered)"
+
+    # Redirect localhost → host.docker.internal for the agent user.
+    # This makes Claude's settings.json "localhost" URLs work transparently —
+    # MCP servers and APIs running on the host are reachable without modifying settings.
+    HOST_IP=$(getent ahosts host.docker.internal 2>/dev/null | awk '/STREAM/ {print $1; exit}')
+    if [ -n "$HOST_IP" ] && [ "$HOST_IP" != "127.0.0.1" ]; then
+        # route_localnet is set via docker-compose sysctls (required for DNAT from 127.0.0.1)
+
+        # Redirect TCP connections from agent user to 127.0.0.1 → host.docker.internal IP
+        # Skip port 53 (DNS stays local for dnsmasq) and 3000 (RemoteAgent runs in container)
+        iptables -t nat -N LOCALHOST_REDIRECT 2>/dev/null || true
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp --dport 53 -j RETURN
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp --dport 3000 -j RETURN
+        iptables -t nat -A LOCALHOST_REDIRECT -p tcp -j DNAT --to-destination "$HOST_IP"
+        iptables -t nat -A OUTPUT -p tcp -m owner --uid-owner $AGENT_UID -d 127.0.0.1 -j LOCALHOST_REDIRECT
+        # MASQUERADE so return traffic from host comes back through the container's network stack
+        iptables -t nat -A POSTROUTING -p tcp -d "$HOST_IP" -m owner --uid-owner $AGENT_UID -j MASQUERADE
+        echo "  [+] localhost redirect: 127.0.0.1 → $HOST_IP (host.docker.internal)"
+    fi
 
     # Allow any port to host.docker.internal (for local development APIs)
     # Use the IP from /etc/hosts (set by docker-compose extra_hosts) or fallback to gateway
