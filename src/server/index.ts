@@ -65,6 +65,21 @@ async function main() {
 
   console.log(`📦 Serving client from: ${reactClientPath}`);
 
+  // ==================== CACHE CONTROL ====================
+  // Prevent browsers (especially mobile) from caching API responses.
+  // This is critical for multi-machine switching: without it, mobile browsers
+  // may serve stale session lists from a previously-selected machine.
+  app.addHook('onRequest', async (request, reply) => {
+    const url = request.url;
+    if (url.startsWith('/api/') || url.startsWith('/proxy/')) {
+      reply.headers({
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+      });
+    }
+  });
+
   // Register API routes BEFORE static files to prevent route shadowing
   await registerRoutes(app);
 
