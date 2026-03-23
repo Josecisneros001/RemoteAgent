@@ -1,4 +1,4 @@
-# Remote Agent Tunnel Script
+﻿# Remote Agent Tunnel Script
 # Uses Microsoft Dev Tunnels (same as VS Code)
 # Creates a persistent tunnel that keeps the same URL across restarts
 
@@ -16,7 +16,7 @@ if ($env:TUNNEL_NAME) {
 }
 
 Write-Host "🔗 Starting tunnel '$TunnelName' on port $Port..." -ForegroundColor Cyan
-Write-Host "   (Override with: `$env:TUNNEL_NAME='my-name' before running)"
+Write-Host '   (Override with: $env:TUNNEL_NAME="my-name" before running)'
 Write-Host ""
 
 # Check if devtunnel is installed
