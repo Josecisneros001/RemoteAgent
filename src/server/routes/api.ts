@@ -22,19 +22,6 @@ const __filename_api = fileURLToPath(import.meta.url);
 const __dirname_api = dirname(__filename_api);
 
 export async function registerRoutes(app: FastifyInstance): Promise<void> {
-  // ==================== CACHE CONTROL ====================
-  // Prevent browsers (especially mobile) from caching API responses.
-  // This is critical for multi-machine switching: without it, mobile browsers
-  // may serve stale session lists from a previously-selected machine.
-  app.addHook('onSend', async (_request, reply) => {
-    const url = _request.url;
-    if (url.startsWith('/api/') || url.startsWith('/proxy/')) {
-      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
-      reply.header('Pragma', 'no-cache');
-      reply.header('Expires', '0');
-    }
-  });
-
   // ==================== CONFIG ====================
 
   // Get config (workspace list — only returns workspaces with valid paths)
