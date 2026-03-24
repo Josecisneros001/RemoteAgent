@@ -32,13 +32,16 @@ if (-not $devtunnel) {
     exit 1
 }
 
-# Check if logged in
+# Check if logged in, auto-login if not
 $userCheck = devtunnel user show 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "📱 You need to log in to Dev Tunnels first." -ForegroundColor Yellow
-    Write-Host "   Run: devtunnel user login -g"
-    Write-Host "   (Uses your GitHub account)"
-    exit 1
+    Write-Host "📱 Not logged in to Dev Tunnels. Logging in with GitHub..." -ForegroundColor Yellow
+    devtunnel user login -g
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ Failed to log in to Dev Tunnels" -ForegroundColor Red
+        Write-Host "   Try manually: devtunnel user login -g"
+        exit 1
+    }
 }
 
 Write-Host "✅ Authenticated with Dev Tunnels" -ForegroundColor Green

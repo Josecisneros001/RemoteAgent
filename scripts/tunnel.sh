@@ -24,12 +24,14 @@ if ! command -v devtunnel &> /dev/null; then
     exit 1
 fi
 
-# Check if logged in
+# Check if logged in, auto-login if not
 if ! devtunnel user show &> /dev/null; then
-    echo "📱 You need to log in to Dev Tunnels first."
-    echo "   Run: devtunnel user login -g"
-    echo "   (Uses your GitHub account)"
-    exit 1
+    echo "📱 Not logged in to Dev Tunnels. Logging in with GitHub..."
+    if ! devtunnel user login -g; then
+        echo "❌ Failed to log in to Dev Tunnels"
+        echo "   Try manually: devtunnel user login -g"
+        exit 1
+    fi
 fi
 
 echo "✅ Authenticated with Dev Tunnels"
