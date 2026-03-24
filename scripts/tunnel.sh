@@ -26,10 +26,10 @@ fi
 
 # Check if logged in, auto-login if not
 if ! devtunnel user show &> /dev/null; then
-    echo "📱 Not logged in to Dev Tunnels. Logging in with GitHub..."
-    if ! devtunnel user login -g; then
+    echo "📱 Not logged in to Dev Tunnels. Logging in with Microsoft Entra..."
+    if ! devtunnel login; then
         echo "❌ Failed to log in to Dev Tunnels"
-        echo "   Try manually: devtunnel user login -g"
+        echo "   Try manually: devtunnel login"
         exit 1
     fi
 fi
