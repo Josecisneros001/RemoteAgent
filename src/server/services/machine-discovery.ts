@@ -332,19 +332,30 @@ export async function discoverMachines(): Promise<Machine[]> {
     // Get our own tunnel name from config to skip ourselves in discovery
     let ownTunnelName: string | undefined;
     try {
-      ownTunnelName = getConfig().tunnelName;
+      const config = getConfig();
+      ownTunnelName = config.tunnelName;
     } catch {
       // Config not loaded yet — fall back to hostname matching
     }
+
+    // Build a set of patterns that identify this machine's own tunnel
+    const localHostname = hostname().toLowerCase();
+    // Match the same normalization that getTunnelName() uses in config.ts
+    const normalizedHostname = localHostname.replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
+    const localMachineId = getLocalMachineId();
 
     for (const tunnel of tunnels) {
       // Derive a machine ID from the tunnel ID (e.g., "remote-agent-abc123" -> "abc123")
       const machineIdFromTunnel = tunnel.tunnelId.replace(/^remote-agent-/, '');
 
-      // Skip if this is our own tunnel
+      // Skip if this is our own tunnel — check multiple ways for robustness
       if (ownTunnelName && tunnel.tunnelId === ownTunnelName) continue;
-      // Fallback: skip if tunnel ID matches our hostname pattern
-      if (!ownTunnelName && machineIdFromTunnel === hostname().toLowerCase().replace(/[^a-z0-9]/g, '')) continue;
+      // Fallback: skip if tunnel ID matches our hostname pattern (using same normalization as config)
+      if (!ownTunnelName && (
+        machineIdFromTunnel === normalizedHostname ||
+        machineIdFromTunnel === localHostname.replace(/[^a-z0-9]/g, '') ||
+        machineIdFromTunnel === localMachineId
+      )) continue;
 
       // Skip tunnels with no host connections AND no cached presence
       // (never-seen tunnels with 0 connections are truly offline/stale)
@@ -403,6 +414,24 @@ export async function discoverMachines(): Promise<Machine[]> {
         // Beyond grace period — drop entirely (don't show stale machines)
       }
     }
+
+    // Final dedup: remove any remote machine whose identity matches the local machine.
+    // This catches cases where the tunnel name didn't match due to naming differences.
+    const localHost = hostname().toLowerCase();
+    const filteredMachines = machines.filter(m => {
+      if (m.isLocal) return true;
+      // If a remote machine's hostname matches local, it's a self-reference
+      const remoteHost = m.machineInfo?.hostname?.toLowerCase();
+      if (remoteHost && remoteHost === localHost) {
+        console.log(`[Discovery] Removing duplicate self-tunnel: ${m.id} (hostname ${remoteHost} matches local)`);
+        return false;
+      }
+      return true;
+    });
+
+    // Replace machines array with deduplicated version
+    machines.length = 0;
+    machines.push(...filteredMachines);
   } catch (err) {
     console.error('[Discovery] Unexpected error during discovery:', err);
   }
