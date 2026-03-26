@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import './MachineSelector.css';
 
@@ -17,8 +17,47 @@ export function MachineSelector() {
   } = useApp();
 
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
-  // Auto-poll machine status every 30s when multiple machines are present
+  // Update scroll fade indicators based on scroll position
+  const updateScrollIndicators = useCallback(() => {
+    const tabs = tabsRef.current;
+    const wrapper = wrapperRef.current;
+    if (!tabs || !wrapper) return;
+
+    const { scrollLeft, scrollWidth, clientWidth } = tabs;
+    const canScrollLeft = scrollLeft > 2;
+    const canScrollRight = scrollLeft + clientWidth < scrollWidth - 2;
+
+    wrapper.classList.toggle('can-scroll-left', canScrollLeft);
+    wrapper.classList.toggle('can-scroll-right', canScrollRight);
+  }, []);
+
+  // Track scroll position for fade indicators
+  useEffect(() => {
+    const tabs = tabsRef.current;
+    if (!tabs) return;
+
+    tabs.addEventListener('scroll', updateScrollIndicators, { passive: true });
+    // Check on mount and when machines change
+    updateScrollIndicators();
+    // Also check after a brief delay (fonts/layout may shift)
+    const timer = setTimeout(updateScrollIndicators, 100);
+
+    return () => {
+      tabs.removeEventListener('scroll', updateScrollIndicators);
+      clearTimeout(timer);
+    };
+  }, [machines.length, updateScrollIndicators]);
+
+  // Re-check indicators on window resize
+  useEffect(() => {
+    window.addEventListener('resize', updateScrollIndicators);
+    return () => window.removeEventListener('resize', updateScrollIndicators);
+  }, [updateScrollIndicators]);
+
+  // Auto-poll machine status every 60s when multiple machines are present
   useEffect(() => {
     if (machines.length <= 1) {
       if (pollIntervalRef.current) {
@@ -85,35 +124,39 @@ export function MachineSelector() {
           </button>
         </div>
       )}
-      <div className="machine-tabs">
-        {machines.map(machine => (
-          <button
-            key={machine.id}
-            className={`machine-tab ${machine.id === currentMachineId ? 'active' : ''} ${machine.status === 'offline' ? 'offline' : ''}`}
-            onClick={() => handleMachineClick(machine.id)}
-            disabled={machine.status === 'offline'}
-            title={machine.status === 'offline' ? `Offline - Last seen: ${getLastSeenText(machine.lastSeen)}` : machine.name}
-          >
-            <span className="machine-icon">{getPlatformIcon(machine.machineInfo?.platform)}</span>
-            <span className="machine-name">{machine.name}</span>
-            {machine.isLocal && <span className="machine-local-tag">(current)</span>}
-            <span className={`machine-status-dot ${machine.status}`} />
-          </button>
-        ))}
-        {!machinesDiscovered && machinesLoading && (
-          <span className="machine-discovering" title="Discovering other machines...">
-            Discovering...
-          </span>
-        )}
+      <div className="machine-tabs-row">
+        <div className="machine-tabs-wrapper" ref={wrapperRef}>
+          <div className="machine-tabs" ref={tabsRef}>
+            {machines.map(machine => (
+              <button
+                key={machine.id}
+                className={`machine-tab ${machine.id === currentMachineId ? 'active' : ''} ${machine.status === 'offline' ? 'offline' : ''}`}
+                onClick={() => handleMachineClick(machine.id)}
+                disabled={machine.status === 'offline'}
+                title={machine.status === 'offline' ? `Offline - Last seen: ${getLastSeenText(machine.lastSeen)}` : machine.name}
+              >
+                <span className="machine-icon">{getPlatformIcon(machine.machineInfo?.platform)}</span>
+                <span className="machine-name">{machine.name}</span>
+                {machine.isLocal && <span className="machine-local-tag">(current)</span>}
+                <span className={`machine-status-dot ${machine.status}`} />
+              </button>
+            ))}
+            {!machinesDiscovered && machinesLoading && (
+              <span className="machine-discovering" title="Discovering other machines...">
+                Discovering...
+              </span>
+            )}
+          </div>
+        </div>
+        <button
+          className={`machine-refresh-btn ${machinesLoading ? 'loading' : ''}`}
+          onClick={refreshMachinesAction}
+          disabled={machinesLoading}
+          title="Refresh machines"
+        >
+          {machinesLoading ? '\u23F3' : '\uD83D\uDD04'}
+        </button>
       </div>
-      <button
-        className={`machine-refresh-btn ${machinesLoading ? 'loading' : ''}`}
-        onClick={refreshMachinesAction}
-        disabled={machinesLoading}
-        title="Refresh machines"
-      >
-        {machinesLoading ? '\u23F3' : '\uD83D\uDD04'}
-      </button>
     </div>
   );
 }

@@ -1,12 +1,9 @@
 .machine-selector {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  flex-direction: column;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
   min-height: 44px;
-  flex-wrap: wrap;
 }
 
 .machine-offline-banner {
@@ -20,7 +17,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 0;
+  margin: 4px 8px;
+  box-sizing: border-box;
 }
 
 .machine-offline-switch {
@@ -38,14 +36,61 @@
   background: rgba(239, 68, 68, 0.3);
 }
 
+.machine-tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  min-height: 44px;
+}
+
+.machine-tabs-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Scroll fade indicators */
+.machine-tabs-wrapper::before,
+.machine-tabs-wrapper::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.machine-tabs-wrapper::before {
+  left: 0;
+  background: linear-gradient(to right, var(--bg-secondary), transparent);
+}
+
+.machine-tabs-wrapper::after {
+  right: 0;
+  background: linear-gradient(to left, var(--bg-secondary), transparent);
+}
+
+.machine-tabs-wrapper.can-scroll-left::before {
+  opacity: 1;
+}
+
+.machine-tabs-wrapper.can-scroll-right::after {
+  opacity: 1;
+}
+
 .machine-tabs {
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  flex: 1;
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* IE/Edge */
   padding: 6px 0;
+  -webkit-overflow-scrolling: touch;
 }
 
 .machine-tabs::-webkit-scrollbar {
@@ -178,9 +223,9 @@
   50% { opacity: 0.8; }
 }
 
-/* Mobile: allow horizontal scroll, slightly smaller */
+/* Mobile: slightly smaller tabs */
 @media (max-width: 767px) {
-  .machine-selector {
+  .machine-tabs-row {
     padding: 0 8px;
   }
 
@@ -196,7 +241,7 @@
 
 /* Desktop: no special changes needed, flex handles it */
 @media (min-width: 768px) {
-  .machine-selector {
+  .machine-tabs-row {
     padding: 0 24px;
   }
 }
