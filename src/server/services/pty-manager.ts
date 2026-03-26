@@ -595,12 +595,6 @@ function checkAndPausePty(ptySession: PtySession): void {
 function checkAndResumePty(ptySession: PtySession): void {
   if (!ptySession.isPaused) return;
 
-  // Clear pause timeout on successful resume
-  if (ptySession.pauseTimeoutId) {
-    clearTimeout(ptySession.pauseTimeoutId);
-    ptySession.pauseTimeoutId = null;
-  }
-
   // Find the maximum pending bytes across all clients
   let maxPending = 0;
   for (const pending of ptySession.pendingBytes.values()) {
@@ -611,6 +605,12 @@ function checkAndResumePty(ptySession: PtySession): void {
 
   // Resume if all clients are below the resume threshold
   if (maxPending < ACK_RESUME_THRESHOLD) {
+    // Clear pause timeout only when actually resuming (prevents deadlock
+    // where timeout is cancelled but pending bytes are still above threshold)
+    if (ptySession.pauseTimeoutId) {
+      clearTimeout(ptySession.pauseTimeoutId);
+      ptySession.pauseTimeoutId = null;
+    }
     ptySession.isPaused = false;
     ptySession.pty.resume();
     console.log(`[PTY] Session ${ptySession.sessionId} resumed (${maxPending} bytes pending)`);

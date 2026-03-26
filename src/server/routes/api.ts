@@ -190,6 +190,13 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
     return { sessions };
   });
 
+  // List all active PTY sessions
+  // IMPORTANT: Must be registered BEFORE /api/sessions/:id to avoid route shadowing
+  app.get('/api/sessions/active', async () => {
+    const activeSessions = getActiveSessions();
+    return { sessions: activeSessions };
+  });
+
   // Get specific session with its runs
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (request, reply) => {
     const session = await getSession(request.params.id);
@@ -434,12 +441,6 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
       active: isSessionActive(sessionId),
       interactive: session.interactive || false,
     };
-  });
-
-  // List all active PTY sessions
-  app.get('/api/sessions/active', async () => {
-    const activeSessions = getActiveSessions();
-    return { sessions: activeSessions };
   });
 
   // ==================== RUNS ====================
